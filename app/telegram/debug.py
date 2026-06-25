@@ -7,6 +7,8 @@ from typing import Any
 from app.shared.types import FilterConfig, ParseResult
 
 DEBUG_PREFIX = "🛠 TWAPx debug"
+TARGET_PREFIX = "📨 TWAPx обработано"
+TARGET_STATUS_MESSAGES = {"accepted✅", "rejected❌", "error⚠️", "skipped⏭"}
 
 
 @dataclass(frozen=True)
@@ -25,6 +27,7 @@ class DebugContext:
     related_message_found: bool | None = None
     target_error: str | None = None
     action: str = "processed"
+    show_target_line: bool = True
 
 
 def should_send_debug(status: str, send_skipped: bool) -> bool:
@@ -34,13 +37,31 @@ def should_send_debug(status: str, send_skipped: bool) -> bool:
 
 
 def is_debug_message(text: str) -> bool:
-    return text.strip().startswith(DEBUG_PREFIX)
+    clean = text.strip()
+    return clean.startswith(DEBUG_PREFIX) or clean.startswith(TARGET_PREFIX) or clean in TARGET_STATUS_MESSAGES
 
 
 def format_debug_result(result: ParseResult, ctx: DebugContext) -> str:
+    return _format_processing_result(DEBUG_PREFIX, result, ctx)
+
+
+def format_target_result(result: ParseResult, ctx: DebugContext) -> str:
+    return _format_processing_result(TARGET_PREFIX, result, ctx)
+
+
+def format_target_status(status: str) -> str:
+    return {
+        "accepted": "accepted✅",
+        "rejected": "rejected❌",
+        "error": "error⚠️",
+        "skipped": "skipped⏭",
+    }.get(status, status)
+
+
+def _format_processing_result(prefix: str, result: ParseResult, ctx: DebugContext) -> str:
     payload = result.payload
     lines = [
-        f"<b>{escape(DEBUG_PREFIX)}</b>",
+        f"<b>{escape(prefix)}</b>",
         "",
         "<b>Цитата сигнала:</b>",
         _quote(ctx.message_text),
@@ -64,22 +85,29 @@ def format_debug_result(result: ParseResult, ctx: DebugContext) -> str:
 
 
 def format_debug_runtime_error(ctx: DebugContext, error: Exception) -> str:
-    return "\n".join(
-        [
-            f"<b>{escape(DEBUG_PREFIX)}</b>",
-            "",
-            "<b>Цитата сигнала:</b>",
-            _quote(ctx.message_text),
-            "",
-            "<b>Реакция:</b> ⚠️ <b>error</b>",
-            f"<b>{escape(_group_title(ctx.group_name))}</b> · <b>n/a</b> · <i>n/a</i> · <code>n/a</code>",
-            "",
-            "<b>Ошибка обработки:</b>",
-            f"<code>{escape(type(error).__name__)}: {escape(str(error))}</code>",
-            "",
-            _source_line(ctx),
-        ]
-    )
+    return _format_runtime_error(DEBUG_PREFIX, ctx, error)
+
+
+def format_target_runtime_error(ctx: DebugContext, error: Exception) -> str:
+    return _format_runtime_error(TARGET_PREFIX, ctx, error)
+
+
+def _format_runtime_error(prefix: str, ctx: DebugContext, error: Exception) -> str:
+    lines = [
+        f"<b>{escape(prefix)}</b>",
+        "",
+        "<b>Цитата сигнала:</b>",
+        _quote(ctx.message_text),
+        "",
+        "<b>Реакция:</b> ⚠️ <b>error</b>",
+        f"<b>{escape(_group_title(ctx.group_name))}</b> · <b>n/a</b> · <i>n/a</i> · <code>n/a</code>",
+        "",
+        "<b>Ошибка обработки:</b>",
+        f"<code>{escape(type(error).__name__)}: {escape(str(error))}</code>",
+        "",
+        _source_line(ctx),
+    ]
+    return "\n".join(lines)
 
 
 def _filter_lines(payload: dict[str, Any], filters: FilterConfig | None) -> list[str]:
@@ -139,7 +167,8 @@ def _details(result: ParseResult, ctx: DebugContext) -> list[str]:
     lines: list[str] = []
     if result.reason and result.reason not in {"parsed", "filter_passed"}:
         lines.extend(["<b>Причина:</b>", *_reason_lines(result.reason)])
-    lines.append(_target_line(result, ctx))
+    if ctx.show_target_line:
+        lines.append(_target_line(result, ctx))
     lines.append(_source_line(ctx))
     return lines
 
@@ -281,3 +310,4 @@ def _price(value: object) -> str:
 
 def _empty(value: object) -> str:
     return "n/a" if value is None else str(value)
+

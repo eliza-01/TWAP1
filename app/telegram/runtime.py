@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Any
 
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, functions, helpers
 from telethon.tl.custom.message import Message
 
 from app.core.env import AppSettings, ensure_runtime_dirs
@@ -15,6 +15,9 @@ from app.telegram.debug import (
     DebugContext,
     format_debug_result,
     format_debug_runtime_error,
+    format_target_result,
+    format_target_runtime_error,
+    format_target_status,
     is_debug_message,
     should_send_debug,
 )
@@ -118,6 +121,7 @@ class TelegramRuntime:
                             chat_id,
                             event.message.id,
                         )
+                        await self._send_target_runtime_error(processor, chat_id, event.message, thread_id, exc)
                         await self._send_debug_runtime_error(processor, chat_id, event.message, thread_id, exc)
 
             if not matched:
@@ -148,6 +152,7 @@ class TelegramRuntime:
         if result.kind in {"twap_created", "twap_result"} and result.status in {"accepted", "rejected"}:
             await asyncio.to_thread(self.message_repo.save_twap_signal, parsed_id, processor.config.name, result)
 
+        related_message_found: bool | None = None
         if result.kind == "twap_result" and result.status == "accepted":
             original = await asyncio.to_thread(
                 self.message_repo.find_forwarded_created_by_reply,
@@ -156,108 +161,20 @@ class TelegramRuntime:
                 chat_id,
                 _message_reply_to_id(message),
             )
+            related_message_found = bool(original)
             if original:
                 await asyncio.to_thread(self.message_repo.link_result_to_created, parsed_id, original)
 
-            if processor.should_forward_result(result, original):
-                forwarded_id: int | None = None
-                target_error: str | None = None
-                try:
-                    forwarded_id = await self._forward_result(processor, result, original)
-                except Exception as exc:
-                    target_error = f"{type(exc).__name__}: {exc}"
-                    logger.exception(
-                        "Failed to forward TWAP result: group=%s source_chat=%s source_msg=%s target_chat=%s target_thread=%s",
-                        processor.config.name,
-                        chat_id,
-                        message.id,
-                        processor.config.target_chat_id,
-                        processor.config.target_thread_id,
-                    )
-
-                await asyncio.to_thread(self.message_repo.mark_forwarded, parsed_id, forwarded_id)
-                await self._send_debug_result(
-                    processor,
-                    result,
-                    chat_id,
-                    message,
-                    thread_id,
-                    incoming_id,
-                    parsed_id,
-                    forwarded_id,
-                    related_message_found=True,
-                    target_error=target_error,
-                    action="twap_result_forward_failed" if target_error else "twap_result_forwarded",
-                )
-                if target_error:
-                    return
-                logger.info(
-                    "Forwarded TWAP result: group=%s msg=%s related_source_msg=%s forwarded=%s",
-                    processor.config.name,
-                    message.id,
-                    _message_reply_to_id(message),
-                    forwarded_id,
-                )
-                return
-
-            await self._send_debug_result(
-                processor,
-                result,
-                chat_id,
-                message,
-                thread_id,
-                incoming_id,
-                parsed_id,
-                related_message_found=bool(original),
-                action="twap_result_stored_without_forward",
-            )
-            logger.info(
-                "TWAP result stored without forward: group=%s chat=%s msg=%s reply_to=%s matched_original=%s",
-                processor.config.name,
-                chat_id,
-                message.id,
-                _message_reply_to_id(message),
-                bool(original),
-            )
-            return
-
-        if not processor.should_forward(result):
-            await self._send_debug_result(
-                processor,
-                result,
-                chat_id,
-                message,
-                thread_id,
-                incoming_id,
-                parsed_id,
-                action="not_forwarded",
-            )
-            logger.info(
-                "Message skipped: group=%s chat=%s msg=%s kind=%s status=%s reason=%s",
-                processor.config.name,
-                chat_id,
-                message.id,
-                result.kind,
-                result.status,
-                result.reason,
-            )
-            return
-
-        forwarded_id: int | None = None
-        target_error: str | None = None
-        try:
-            forwarded_id = await self._forward_created(processor, result)
-        except Exception as exc:
-            target_error = f"{type(exc).__name__}: {exc}"
-            logger.exception(
-                "Failed to forward accepted TWAP: group=%s source_chat=%s source_msg=%s target_chat=%s target_thread=%s",
-                processor.config.name,
-                chat_id,
-                message.id,
-                processor.config.target_chat_id,
-                processor.config.target_thread_id,
-            )
-
+        forwarded_id, target_error = await self._forward_processed_message(
+            processor,
+            result,
+            chat_id,
+            message,
+            thread_id,
+            incoming_id,
+            parsed_id,
+            related_message_found=related_message_found,
+        )
         await asyncio.to_thread(self.message_repo.mark_forwarded, parsed_id, forwarded_id)
         await self._send_debug_result(
             processor,
@@ -268,12 +185,21 @@ class TelegramRuntime:
             incoming_id,
             parsed_id,
             forwarded_id,
+            related_message_found=related_message_found,
             target_error=target_error,
-            action="twap_created_forward_failed" if target_error else "twap_created_forwarded",
+            action="target_forward_failed" if target_error else "target_forwarded",
         )
-        if target_error:
-            return
-        logger.info("Forwarded accepted TWAP: group=%s msg=%s forwarded=%s", processor.config.name, message.id, forwarded_id)
+
+        logger.info(
+            "Message processed and forwarded to target: group=%s chat=%s msg=%s kind=%s status=%s reason=%s forwarded=%s",
+            processor.config.name,
+            chat_id,
+            message.id,
+            result.kind,
+            result.status,
+            result.reason,
+            forwarded_id,
+        )
 
     async def _send_debug_result(
         self,
@@ -312,6 +238,42 @@ class TelegramRuntime:
             action=action,
         )
         await self._send_debug_message(chat_id, thread_id, int(message.id), format_debug_result(result, ctx))
+
+    async def _send_target_runtime_error(
+        self,
+        processor: GroupProcessor,
+        chat_id: int,
+        message: Message,
+        thread_id: int | None,
+        error: Exception,
+    ) -> None:
+        ctx = DebugContext(
+            group_name=processor.config.name,
+            parser_key=processor.parser_key,
+            chat_id=chat_id,
+            thread_id=thread_id,
+            message_id=int(message.id),
+            reply_to_message_id=_message_reply_to_id(message),
+            message_text=message.raw_text or "",
+            filters=processor.config.filters,
+            action="runtime_exception",
+            show_target_line=False,
+        )
+
+        try:
+            forwarded_id = await self._forward_source_message_to_target(processor, chat_id, message)
+            await self._send_target_status(processor, "error", forwarded_id)
+        except Exception as forward_exc:
+            logger.exception(
+                "Failed to forward runtime error source message to target: target_chat=%s target_thread=%s",
+                processor.config.target_chat_id,
+                processor.config.target_thread_id,
+            )
+            await self._send_target_fallback_report(
+                processor,
+                format_target_runtime_error(ctx, error),
+                f"{type(forward_exc).__name__}: {forward_exc}",
+            )
 
     async def _send_debug_runtime_error(
         self,
@@ -363,64 +325,164 @@ class TelegramRuntime:
 
         return debug.thread_id
 
-    async def _forward_created(self, processor: GroupProcessor, result) -> int | None:
+    async def _forward_processed_message(
+        self,
+        processor: GroupProcessor,
+        result,
+        chat_id: int,
+        message: Message,
+        thread_id: int | None,
+        incoming_id: int | None,
+        parsed_id: int | None,
+        related_message_found: bool | None = None,
+    ) -> tuple[int | None, str | None]:
+        ctx = DebugContext(
+            group_name=processor.config.name,
+            parser_key=processor.parser_key,
+            chat_id=chat_id,
+            thread_id=thread_id,
+            message_id=int(message.id),
+            reply_to_message_id=_message_reply_to_id(message),
+            message_text=message.raw_text or "",
+            filters=processor.config.filters,
+            incoming_id=incoming_id,
+            parsed_id=parsed_id,
+            related_message_found=related_message_found,
+            action="target_forward",
+            show_target_line=False,
+        )
+
+        try:
+            forwarded_id = await self._forward_source_message_to_target(processor, chat_id, message)
+        except Exception as exc:
+            target_error = f"{type(exc).__name__}: {exc}"
+            logger.exception(
+                "Failed to forward source message to target: group=%s source_chat=%s source_msg=%s target_chat=%s target_thread=%s",
+                processor.config.name,
+                chat_id,
+                message.id,
+                processor.config.target_chat_id,
+                processor.config.target_thread_id,
+            )
+            await self._send_target_fallback_report(processor, format_target_result(result, ctx), target_error)
+            return None, target_error
+
+        try:
+            await self._send_target_status(processor, result.status, forwarded_id)
+            return forwarded_id, None
+        except Exception as exc:
+            target_error = f"{type(exc).__name__}: {exc}"
+            logger.exception(
+                "Failed to send target status reply: group=%s forwarded_msg=%s target_chat=%s",
+                processor.config.name,
+                forwarded_id,
+                processor.config.target_chat_id,
+            )
+            return forwarded_id, target_error
+
+    async def _forward_source_message_to_target(self, processor: GroupProcessor, source_chat_id: int, message: Message) -> int | None:
+        logger.info(
+            "Forwarding source message to target: group=%s source_chat=%s source_msg=%s target_chat=%s target_thread=%s",
+            processor.config.name,
+            source_chat_id,
+            message.id,
+            processor.config.target_chat_id,
+            processor.config.target_thread_id,
+        )
+
+        try:
+            sent = await self._forward_source_message_to_topic(processor, source_chat_id, int(message.id))
+        except TypeError:
+            logger.warning("Topic-aware forward is not supported by current Telethon build; using forward_messages fallback")
+            sent = await self.client.forward_messages(
+                processor.config.target_chat_id,
+                int(message.id),
+                from_peer=source_chat_id,
+            )
+
+        forwarded_id = _sent_message_id(sent)
+        logger.info(
+            "Source message forwarded: group=%s target_chat=%s target_thread=%s forwarded_msg=%s",
+            processor.config.name,
+            processor.config.target_chat_id,
+            processor.config.target_thread_id,
+            forwarded_id,
+        )
+        return forwarded_id
+
+    async def _forward_source_message_to_topic(self, processor: GroupProcessor, source_chat_id: int, source_message_id: int):
+        source_peer = await self.client.get_input_entity(source_chat_id)
+        target_peer = await self.client.get_input_entity(processor.config.target_chat_id)
+        request = functions.messages.ForwardMessagesRequest(
+            from_peer=source_peer,
+            id=[source_message_id],
+            random_id=[helpers.generate_random_long()],
+            to_peer=target_peer,
+            top_msg_id=processor.config.target_thread_id or None,
+        )
+        result = await self.client(request)
+        return _forward_response_message(result)
+
+    async def _send_target_status(self, processor: GroupProcessor, status: str, forwarded_message_id: int | None) -> int | None:
+        kwargs: dict[str, Any] = {}
+        if forwarded_message_id:
+            kwargs["reply_to"] = forwarded_message_id
+        elif processor.config.target_thread_id:
+            kwargs["reply_to"] = processor.config.target_thread_id
+
+        sent = await self.client.send_message(
+            processor.config.target_chat_id,
+            format_target_status(status),
+            link_preview=False,
+            **kwargs,
+        )
+        return int(sent.id) if sent else None
+
+    async def _send_target_fallback_report(self, processor: GroupProcessor, text: str, target_error: str) -> None:
         kwargs: dict[str, Any] = {}
         if processor.config.target_thread_id:
             kwargs["reply_to"] = processor.config.target_thread_id
 
-        logger.info(
-            "Sending accepted TWAP to target: group=%s target_chat=%s target_thread=%s asset=%s",
-            processor.config.name,
-            processor.config.target_chat_id,
-            processor.config.target_thread_id,
-            result.payload.get("asset"),
-        )
-        sent = await self.client.send_message(
-            processor.config.target_chat_id,
-            processor.format_forward(result),
-            link_preview=False,
-            **kwargs,
-        )
-        logger.info(
-            "Target accepted TWAP sent: group=%s target_chat=%s target_thread=%s sent_msg=%s",
-            processor.config.name,
-            processor.config.target_chat_id,
-            processor.config.target_thread_id,
-            getattr(sent, "id", None),
-        )
-        return int(sent.id) if sent else None
-
-    async def _forward_result(self, processor: GroupProcessor, result, original: dict[str, Any]) -> int | None:
-        reply_to = original.get("forwarded_message_id") or processor.config.target_thread_id
-        kwargs: dict[str, Any] = {}
-        if reply_to:
-            kwargs["reply_to"] = int(reply_to)
-
-        logger.info(
-            "Sending TWAP result to target: group=%s target_chat=%s reply_to=%s asset=%s",
-            processor.config.name,
-            processor.config.target_chat_id,
-            reply_to,
-            result.payload.get("asset"),
-        )
-        sent = await self.client.send_message(
-            processor.config.target_chat_id,
-            processor.format_result(result, original),
-            link_preview=False,
-            **kwargs,
-        )
-        logger.info(
-            "Target TWAP result sent: group=%s target_chat=%s sent_msg=%s",
-            processor.config.name,
-            processor.config.target_chat_id,
-            getattr(sent, "id", None),
-        )
-        return int(sent.id) if sent else None
+        try:
+            await self.client.send_message(
+                processor.config.target_chat_id,
+                f"{text}\n\n<b>Ошибка пересылки:</b> <code>{target_error}</code>",
+                parse_mode="html",
+                link_preview=False,
+                **kwargs,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to send fallback target report: target_chat=%s target_thread=%s",
+                processor.config.target_chat_id,
+                processor.config.target_thread_id,
+            )
 
     def _validate_settings(self) -> None:
         if not self.settings.telegram.api_id or not self.settings.telegram.api_hash:
             raise ValueError("Fill TELEGRAM_API_ID and TELEGRAM_API_HASH in .env")
 
+
+
+def _forward_response_message(result):
+    if result is None:
+        return None
+    updates = getattr(result, "updates", None) or []
+    for update in updates:
+        message = getattr(update, "message", None)
+        if message is not None and getattr(message, "id", None) is not None:
+            return message
+    return result
+
+
+def _sent_message_id(sent) -> int | None:
+    if sent is None:
+        return None
+    if isinstance(sent, list):
+        return _sent_message_id(sent[0]) if sent else None
+    if getattr(sent, "id", None) is not None:
+        return int(sent.id)
+    return None
 
 def _safe_message_json(message: Message) -> dict[str, Any]:
     try:
@@ -453,3 +515,4 @@ def _message_reply_to_id(message: Message) -> int | None:
 
     reply_to_msg_id = getattr(message, "reply_to_msg_id", None)
     return int(reply_to_msg_id) if reply_to_msg_id else None
+

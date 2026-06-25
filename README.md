@@ -1,3 +1,4 @@
+venv\Scripts\activate
 docker compose down
 docker compose build --no-cache app
 docker compose up -d mysql phpmyadmin
