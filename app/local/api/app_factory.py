@@ -19,6 +19,7 @@ from app.local.api.routes import (
     settings_get,
     settings_save,
     signals_recent,
+    signals_sync,
     ui,
 )
 from app.local.signal_client.client import LocalSignalClient
@@ -56,6 +57,7 @@ def create_local_app() -> FastAPI:
         order_open.router,
         order_close.router,
         signals_recent.router,
+        signals_sync.router,
     ]:
         app.include_router(router)
     return app

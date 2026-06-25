@@ -31,15 +31,24 @@ class LocalSignalClient:
     async def _run(self) -> None:
         while not self._stop.is_set():
             settings = self.settings_store.load()
-            if not settings.signals.enabled or not settings.signals.server_ws_url:
+            if not settings.signals.enabled:
                 await asyncio.sleep(3)
                 continue
+
+            if not settings.signals.server_ws_url:
+                logger.warning("Signal client enabled, but WebSocket URL is empty")
+                await asyncio.sleep(5)
+                continue
+
             url = settings.signals.server_ws_url
             headers = {}
             if settings.signals.device_token:
                 headers["Authorization"] = f"Bearer {settings.signals.device_token}"
+
             try:
+                logger.info("Signal client connecting: %s", url)
                 async with websockets.connect(url, additional_headers=headers) as ws:
+                    logger.info("Signal client connected")
                     await ws.send(json.dumps({"type": "hello", "last_signal_id": settings.signals.last_signal_id}))
                     async for raw in ws:
                         await self._handle_message(raw)
@@ -59,3 +68,4 @@ class LocalSignalClient:
         signal_id = int(signal.get("signal_id") or signal.get("id") or 0)
         if signal_id:
             self.settings_store.update({"signals": {"last_signal_id": signal_id}})
+            logger.info("Signal saved: id=%s symbol=%s", signal_id, signal.get("symbol") or signal.get("asset"))

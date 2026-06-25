@@ -82,16 +82,20 @@ def render_page() -> str:
 
   <details>
     <summary>4. Сервер сигналов</summary>
+    <p class=\"muted\">Если local и signal-server запущены в Docker Compose, используй <code>ws://signal-server:8090/ws/signals</code> и <code>http://signal-server:8090</code>. <code>127.0.0.1</code> внутри local-контейнера указывает на сам local-контейнер.</p>
     <div class=\"grid\">
-      <div><label>WebSocket URL</label><input id=\"serverWs\" placeholder=\"ws://host:8090/ws/signals\" /></div>
-      <div><label>HTTP URL</label><input id=\"serverHttp\" placeholder=\"http://host:8090\" /></div>
+      <div><label>WebSocket URL</label><input id=\"serverWs\" placeholder=\"ws://signal-server:8090/ws/signals\" /></div>
+      <div><label>HTTP URL</label><input id=\"serverHttp\" placeholder=\"http://signal-server:8090\" /></div>
       <div><label>Device token</label><input id=\"deviceToken\" type=\"password\" /></div>
       <div><label>Слушать сигналы</label><select id=\"signalsEnabled\"><option value=\"true\">Да</option><option value=\"false\">Нет</option></select></div>
     </div>
     <div class=\"row\" style=\"margin-top:10px\">
       <button onclick=\"saveSettings()\">Сохранить</button>
-      <button class=\"secondary\" onclick=\"loadSignals()\">Последние сигналы</button>
+      <button class=\"secondary\" onclick=\"syncSignals()\">Синхронизировать с сервера</button>
+      <button class=\"secondary\" onclick=\"loadSignals()\">Последние локальные</button>
+      <button class=\"secondary\" onclick=\"signalStatus()\">Статус</button>
     </div>
+    <pre id=\"signalStatus\" class=\"status\"></pre>
     <table><thead><tr><th>ID</th><th>Актив</th><th>Сторона</th><th>Цена</th><th>Объем</th><th>Источник</th></tr></thead><tbody id=\"signals\"></tbody></table>
   </details>
 </main>
@@ -120,6 +124,8 @@ async function init() {
   $('leverage').value = settings.trading?.default_leverage || 1;
   $('direction').value = settings.trading?.default_direction || 'long';
   await checkStatus();
+  await signalStatus();
+  await loadSignals();
 }
 async function saveSettings() {
   const patch = {
@@ -131,6 +137,7 @@ async function saveSettings() {
   if ($('mexcToken').value) patch.exchanges.mexc.auth_token = $('mexcToken').value;
   if ($('deviceToken').value) patch.signals.device_token = $('deviceToken').value;
   show('status', await api('/api/settings', {method:'PUT', body: JSON.stringify(patch)}));
+  await signalStatus();
 }
 async function checkStatus() { try { show('status', await api(`/api/exchanges/${selected}/status`)); } catch(e) { show('status', e.message); } }
 async function loadBalance() { try { show('status', await api(`/api/exchanges/${selected}/balance`)); } catch(e) { show('status', e.message); } }
@@ -150,6 +157,14 @@ async function loadSignals() {
   const data = await api('/api/signals/recent');
   $('signals').innerHTML = data.items.map(x => `<tr><td>${x.signal_id || x.id || ''}</td><td>${x.asset || x.symbol || ''}</td><td>${x.side || ''}</td><td>${x.price || ''}</td><td>${x.amount_usd || ''}</td><td>${x.source || x.group_name || ''}</td></tr>`).join('');
 }
+async function syncSignals() {
+  try {
+    const data = await api('/api/signals/sync', {method:'POST'});
+    show('signalStatus', data);
+    await loadSignals();
+  } catch(e) { show('signalStatus', e.message); }
+}
+async function signalStatus() { try { show('signalStatus', await api('/api/signals/status')); } catch(e) { show('signalStatus', e.message); } }
 init();
 </script>
 </body>
