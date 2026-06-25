@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from os import getenv
+
 from app.core.env import env_bool, env_float, env_int, env_int_list
 from app.shared.types import FilterConfig, SourceGroupConfig
 
@@ -37,21 +39,36 @@ def _source_threads_by_chat_id(source_chat_ids: list[int]) -> dict[int, set[int]
 
 
 def _parse_chat_thread_map(env_name: str) -> dict[int, set[int]]:
-    from os import getenv
-
     raw = getenv(env_name, "").strip()
     if not raw:
         return {}
 
     result: dict[int, set[int]] = {}
+    current_chat_id: int | None = None
+
     for item in raw.split(","):
         chunk = item.strip()
         if not chunk:
             continue
-        chat_raw, _, threads_raw = chunk.partition(":")
-        if not chat_raw or not threads_raw:
+
+        if ":" in chunk:
+            chat_raw, _, threads_raw = chunk.partition(":")
+            if not chat_raw.strip() or not threads_raw.strip():
+                raise ValueError(f"Invalid {env_name} item: {chunk}")
+            current_chat_id = int(chat_raw.strip())
+            result.setdefault(current_chat_id, set()).update(_parse_thread_ids(threads_raw))
+            continue
+
+        if current_chat_id is None:
             raise ValueError(f"Invalid {env_name} item: {chunk}")
-        chat_id = int(chat_raw.strip())
-        thread_ids = {int(value.strip()) for value in threads_raw.replace("|", ";").split(";") if value.strip()}
-        result.setdefault(chat_id, set()).update(thread_ids)
+        result.setdefault(current_chat_id, set()).update(_parse_thread_ids(chunk))
+
     return result
+
+
+def _parse_thread_ids(value: str) -> set[int]:
+    return {
+        int(item.strip())
+        for item in value.replace("|", ";").replace(",", ";").split(";")
+        if item.strip()
+    }

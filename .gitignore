@@ -8,3 +8,4 @@ mysql_data/
 
 tools/dump/project_bundle.txt
 tools/dump/files_list.txt
+local_data/

@@ -1,0 +1,26 @@
+from __future__ import annotations
+
+from fastapi import APIRouter
+
+from app.local.api.deps import selected_exchange
+
+router = APIRouter(prefix="/api/exchanges", tags=["exchanges"])
+
+
+@router.get("/{exchange}/positions")
+async def exchange_positions(exchange: str, symbol: str | None = None) -> dict:
+    adapter = selected_exchange(exchange)
+    positions = await adapter.positions(symbol)
+    return {
+        "items": [
+            {
+                "symbol": item.symbol,
+                "direction": item.direction,
+                "volume": item.volume,
+                "entry_price": item.entry_price,
+                "pnl": item.pnl,
+                "position_id": item.position_id,
+            }
+            for item in positions
+        ]
+    }

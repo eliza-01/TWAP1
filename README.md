@@ -1,3 +1,21 @@
+docker compose build
+docker compose up -d mysql phpmyadmin app
+docker compose --profile local up -d local
+docker compose --profile server up -d signal-server
+
+
+Локальный клиент:
+docker compose --profile local up -d local
+
+http://localhost:8080
+
+Signal Server:
+docker compose --profile server up -d signal-server
+
+Адреса:
+http://localhost:8090
+ws://localhost:8090/ws/signals
+
 venv\Scripts\activate
 docker compose down
 docker compose build --no-cache app
@@ -219,3 +237,63 @@ python tools/dump/main.py --root /path/to/twap_telegram_parser
 ```bash
 python tools/dump/main.py --include-env
 ```
+
+## Локальный торговый клиент и Signal Server
+
+В проект добавлены два отдельных режима запуска.
+
+### Локальный клиент
+
+Локальный клиент запускает MVP-интерфейс для пользователя. В нём можно выбрать биржу, включить/выключить её, сохранить локальный MEXC WEB token, проверить подключение, посмотреть баланс, список futures-активов, позиции и вручную открыть/закрыть market-сделку.
+
+```bash
+docker compose --profile local up -d local
+```
+
+Интерфейс:
+
+```text
+http://localhost:8080
+```
+
+Локальные настройки пользователя сохраняются в:
+
+```text
+local_data/settings.json
+local_data/signals.json
+```
+
+Эти файлы не коммитятся и остаются у каждого пользователя локально.
+
+### Центральный сервер сигналов
+
+Signal Server читает принятые `twap_created` сигналы из MySQL и отдаёт их локальным клиентам:
+
+- WebSocket: `/ws/signals`
+- HTTP fallback: `/api/signals/pending?after_id=0`
+
+Запуск:
+
+```bash
+docker compose --profile server up -d signal-server
+```
+
+URL по умолчанию:
+
+```text
+http://localhost:8090
+ws://localhost:8090/ws/signals
+```
+
+Локальный клиент сам держит исходящее WebSocket-соединение с сервером. Это важно: сервер не обязан пробивать NAT/firewall пользователя входящими запросами. Если соединение оборвалось, клиент хранит `last_signal_id` и может забрать пропущенные сигналы через HTTP fallback.
+
+### Разделение ответственности
+
+- `app/exchanges/core/` — общий контракт бирж.
+- `app/exchanges/mexc/` — изолированный MEXC Futures REST-адаптер.
+- `app/local/` — локальный UI, локальные настройки, клиент сигналов.
+- `app/local/api/routes/` — API локального UI, ручки разнесены по файлам.
+- `app/signal_server/` — центральный HTTP/WebSocket сервер сигналов.
+- `app/signal_server/api/routes/` — ручки сервера сигналов разнесены по файлам.
+
+Для добавления новой биржи нужно создать новый каталог `app/exchanges/<exchange>/` и зарегистрировать адаптер в `app/exchanges/registry.py`.
