@@ -1,0 +1,10 @@
+.env
+sessions/*.session
+sessions/*.session-journal
+__pycache__/
+*.pyc
+.pytest_cache/
+mysql_data/
+
+tools/dump/project_bundle.txt
+tools/dump/files_list.txt
