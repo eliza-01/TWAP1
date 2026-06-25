@@ -43,6 +43,7 @@ IGNORE_DIRS = {
     "sessions",
     "venv",
     ".venv",
+    "tools",
 }
 
 ALLOWED_NAMES = {

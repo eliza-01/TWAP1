@@ -40,6 +40,11 @@ def env_int_list(name: str, default: Iterable[int] | None = None) -> list[int]:
     return [int(item) for item in _split_csv(raw)]
 
 
+def _optional_env_int(name: str) -> int | None:
+    raw = env_str(name)
+    return int(raw) if raw else None
+
+
 @dataclass(frozen=True)
 class DbSettings:
     host: str
@@ -58,9 +63,18 @@ class TelegramSettings:
 
 
 @dataclass(frozen=True)
+class DebugSettings:
+    enabled: bool
+    chat_id: int | None
+    thread_id: int | None
+    send_skipped: bool
+
+
+@dataclass(frozen=True)
 class AppSettings:
     db: DbSettings
     telegram: TelegramSettings
+    debug: DebugSettings
     groups: list[str]
     history_limit: int
 
@@ -81,6 +95,12 @@ def load_settings() -> AppSettings:
             api_hash=env_str("TELEGRAM_API_HASH"),
             phone=env_str("TELEGRAM_PHONE"),
             session_path=env_str("TELEGRAM_SESSION_PATH", "sessions/twap_user.session"),
+        ),
+        debug=DebugSettings(
+            enabled=env_bool("DEBUG_ENABLED", False),
+            chat_id=_optional_env_int("DEBUG_CHAT_ID"),
+            thread_id=_optional_env_int("DEBUG_THREAD_ID"),
+            send_skipped=env_bool("DEBUG_SEND_SKIPPED", False),
         ),
         groups=_split_csv(env_str("GROUPS", "twapx")),
         history_limit=env_int("HISTORY_LIMIT", 1000),
