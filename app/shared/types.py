@@ -40,6 +40,7 @@ class IncomingMessage:
     group_name: str
     chat_id: int
     thread_id: int | None
+    reply_to_message_id: int | None
     message_id: int
     text: str
     message_date: datetime | None

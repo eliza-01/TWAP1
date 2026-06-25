@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, Protocol
 
 from app.groups.twapx.config import PARSER_KEY as TWAPX_PARSER_KEY
 from app.groups.twapx.config import load_config as load_twapx_config
@@ -16,7 +16,11 @@ class GroupProcessor(Protocol):
 
     def should_forward(self, result: ParseResult) -> bool: ...
 
+    def should_forward_result(self, result: ParseResult, original: dict[str, Any] | None) -> bool: ...
+
     def format_forward(self, result: ParseResult) -> str: ...
+
+    def format_result(self, result: ParseResult, original: dict[str, Any]) -> str: ...
 
 
 def load_processors(group_names: list[str]) -> list[GroupProcessor]:

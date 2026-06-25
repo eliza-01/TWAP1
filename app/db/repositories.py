@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any
 
@@ -44,15 +45,22 @@ class MessageRepository:
             cursor.execute(
                 """
                 INSERT INTO incoming_messages
-                    (group_name, telegram_chat_id, telegram_thread_id, telegram_message_id, message_date, raw_text, raw_json)
-                VALUES (%s, %s, %s, %s, %s, %s, CAST(%s AS JSON))
-                ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)
+                    (group_name, telegram_chat_id, telegram_thread_id, telegram_message_id,
+                     telegram_reply_to_message_id, message_date, raw_text, raw_json)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, CAST(%s AS JSON))
+                ON DUPLICATE KEY UPDATE
+                    id = LAST_INSERT_ID(id),
+                    telegram_thread_id = VALUES(telegram_thread_id),
+                    telegram_reply_to_message_id = VALUES(telegram_reply_to_message_id),
+                    raw_text = VALUES(raw_text),
+                    raw_json = VALUES(raw_json)
                 """,
                 (
                     message.group_name,
                     message.chat_id,
                     message.thread_id,
                     message.message_id,
+                    message.reply_to_message_id,
                     _dt(message.message_date),
                     message.text,
                     json_dump(message.raw_json),
@@ -86,6 +94,66 @@ class MessageRepository:
                 ),
             )
             return int(cursor.lastrowid)
+
+    def link_result_to_created(self, parsed_id: int, original: dict[str, Any]) -> None:
+        with db_cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE parsed_messages
+                SET related_incoming_message_id = %s,
+                    related_parsed_message_id = %s
+                WHERE id = %s
+                """,
+                (original.get("incoming_id"), original.get("parsed_id"), parsed_id),
+            )
+
+    def find_forwarded_created_by_reply(
+        self,
+        group_name: str,
+        parser_key: str,
+        chat_id: int,
+        reply_to_message_id: int | None,
+    ) -> dict[str, Any] | None:
+        if reply_to_message_id is None:
+            return None
+
+        with db_cursor(dictionary=True) as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    im.id AS incoming_id,
+                    pm.id AS parsed_id,
+                    pm.forwarded_message_id,
+                    ts.asset,
+                    ts.side,
+                    ts.amount_usd,
+                    ts.duration_minutes,
+                    ts.price,
+                    ts.market_volume_usd,
+                    ts.twap_share_percent,
+                    ts.score,
+                    ts.user_address,
+                    ts.payload_json
+                FROM incoming_messages im
+                JOIN parsed_messages pm ON pm.incoming_message_id = im.id
+                LEFT JOIN twap_signals ts ON ts.parsed_message_id = pm.id
+                WHERE im.group_name = %s
+                  AND im.telegram_chat_id = %s
+                  AND im.telegram_message_id = %s
+                  AND pm.parser_key = %s
+                  AND pm.kind = 'twap_created'
+                  AND pm.status = 'accepted'
+                ORDER BY pm.id DESC
+                LIMIT 1
+                """,
+                (group_name, chat_id, reply_to_message_id, parser_key),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+        row["payload"] = _json_load(row.get("payload_json"))
+        return row
 
     def save_twap_signal(self, parsed_id: int, group_name: str, result: ParseResult) -> None:
         payload = result.payload
@@ -145,3 +213,14 @@ def _dt(value: datetime | None) -> str | None:
     if value is None:
         return None
     return value.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _json_load(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not value:
+        return {}
+    try:
+        return json.loads(value)
+    except Exception:
+        return {}

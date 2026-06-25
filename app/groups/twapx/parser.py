@@ -113,8 +113,12 @@ def _parse_created(text: str) -> ParseResult | None:
 
 
 def _parse_result(text: str) -> ParseResult | None:
-    if _RESULT_RU_RE.search(text) is None:
+    result_header = _RESULT_RU_RE.search(text)
+    if result_header is None:
         return None
+
+    label = result_header.group("label").lower().replace("ё", "е")
+    result_type = "cancelled" if label.startswith("отмен") else "finished"
 
     end = _PRICE_END_RE.search(text)
     result_percent = None
@@ -128,6 +132,7 @@ def _parse_result(text: str) -> ParseResult | None:
 
     size = _SIZE_RE.search(text)
     payload: dict[str, Any] = {
+        "result_type": result_type,
         "status": _optional_group(_STATUS_RE, text),
         "executed_percent": _optional_num(_EXECUTED_RE, text),
         "twap_id": _optional_int(_TWAP_ID_RE, text),

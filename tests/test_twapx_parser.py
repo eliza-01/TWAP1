@@ -54,3 +54,23 @@ TwapId: 1965085
     assert result.kind == "twap_result"
     assert result.payload["asset"] == "HYPE"
     assert result.payload["result_percent"] == -0.26
+
+
+def test_parse_russian_cancelled_result_type():
+    text = """❌ TWAP отменён (частично)
+Статус: error
+Исполнено: 81.82%
+Размер: 4413630.00 / 5394445.00 MON
+TwapId: 1732963
+Субъект: 0xbba0681681815bd70f9075e0235e7997b7b519d9
+
+Цена в начале:  $0.035154
+Цена в конце: $0.034733 🟢 (-1.20%)
+"""
+    result = parse(text)
+    assert result.kind == "twap_result"
+    assert result.payload["result_type"] == "cancelled"
+    assert result.payload["asset"] == "MON"
+    assert result.payload["executed_percent"] == 81.82
+    assert result.payload["twap_id"] == 1732963
+    assert result.payload["result_percent"] == 1.20

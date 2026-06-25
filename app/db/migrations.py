@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import logging
+
+from mysql.connector import Error as MySQLError
+
 from app.db.connection import db_cursor
+
+logger = logging.getLogger(__name__)
 
 _TABLES = [
     """
@@ -26,19 +32,23 @@ _TABLES = [
         telegram_chat_id BIGINT NOT NULL,
         telegram_thread_id BIGINT NULL,
         telegram_message_id BIGINT NOT NULL,
+        telegram_reply_to_message_id BIGINT NULL,
         message_date DATETIME NULL,
         raw_text MEDIUMTEXT NOT NULL,
         raw_json JSON NOT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uq_chat_message (telegram_chat_id, telegram_message_id),
         KEY idx_group_date (group_name, message_date),
-        KEY idx_chat_thread (telegram_chat_id, telegram_thread_id)
+        KEY idx_chat_thread (telegram_chat_id, telegram_thread_id),
+        KEY idx_reply_message (telegram_chat_id, telegram_reply_to_message_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     """,
     """
     CREATE TABLE IF NOT EXISTS parsed_messages (
         id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
         incoming_message_id BIGINT UNSIGNED NOT NULL,
+        related_incoming_message_id BIGINT UNSIGNED NULL,
+        related_parsed_message_id BIGINT UNSIGNED NULL,
         parser_key VARCHAR(64) NOT NULL,
         kind VARCHAR(64) NOT NULL,
         status VARCHAR(32) NOT NULL,
@@ -49,6 +59,8 @@ _TABLES = [
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uq_incoming_parser (incoming_message_id, parser_key),
         KEY idx_status_kind (status, kind),
+        KEY idx_related_incoming (related_incoming_message_id),
+        KEY idx_related_parsed (related_parsed_message_id),
         CONSTRAINT fk_parsed_incoming FOREIGN KEY (incoming_message_id)
             REFERENCES incoming_messages(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -83,8 +95,24 @@ _TABLES = [
     """,
 ]
 
+_ALTERS = [
+    "ALTER TABLE incoming_messages ADD COLUMN telegram_reply_to_message_id BIGINT NULL AFTER telegram_message_id",
+    "ALTER TABLE incoming_messages ADD KEY idx_reply_message (telegram_chat_id, telegram_reply_to_message_id)",
+    "ALTER TABLE parsed_messages ADD COLUMN related_incoming_message_id BIGINT UNSIGNED NULL AFTER incoming_message_id",
+    "ALTER TABLE parsed_messages ADD COLUMN related_parsed_message_id BIGINT UNSIGNED NULL AFTER related_incoming_message_id",
+    "ALTER TABLE parsed_messages ADD KEY idx_related_incoming (related_incoming_message_id)",
+    "ALTER TABLE parsed_messages ADD KEY idx_related_parsed (related_parsed_message_id)",
+]
+
 
 def migrate() -> None:
     with db_cursor() as cursor:
         for query in _TABLES:
             cursor.execute(query)
+        for query in _ALTERS:
+            try:
+                cursor.execute(query)
+            except MySQLError as exc:
+                if exc.errno not in {1060, 1061}:  # duplicate column/key
+                    raise
+                logger.debug("Migration skipped existing schema object: %s", query)

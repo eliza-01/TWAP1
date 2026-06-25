@@ -83,10 +83,12 @@ class TelegramRuntime:
                 return
 
             thread_id = _message_thread_id(event.message)
+            reply_to_message_id = _message_reply_to_id(event.message)
             logger.info(
-                "Incoming Telegram message: chat=%s thread=%s msg=%s sender=%s",
+                "Incoming Telegram message: chat=%s thread=%s reply_to=%s msg=%s sender=%s",
                 chat_id,
                 thread_id,
+                reply_to_message_id,
                 event.message.id,
                 getattr(event.message, "sender_id", None),
             )
@@ -112,6 +114,7 @@ class TelegramRuntime:
             chat_id=chat_id,
             thread_id=thread_id,
             message_id=int(message.id),
+            reply_to_message_id=_message_reply_to_id(message),
             text=text,
             message_date=message.date,
             raw_json=_safe_message_json(message),
@@ -123,6 +126,39 @@ class TelegramRuntime:
 
         if result.kind in {"twap_created", "twap_result"} and result.status in {"accepted", "rejected"}:
             await asyncio.to_thread(self.message_repo.save_twap_signal, parsed_id, processor.config.name, result)
+
+        if result.kind == "twap_result" and result.status == "accepted":
+            original = await asyncio.to_thread(
+                self.message_repo.find_forwarded_created_by_reply,
+                processor.config.name,
+                processor.parser_key,
+                chat_id,
+                _message_reply_to_id(message),
+            )
+            if original:
+                await asyncio.to_thread(self.message_repo.link_result_to_created, parsed_id, original)
+
+            if processor.should_forward_result(result, original):
+                forwarded_id = await self._forward_result(processor, result, original)
+                await asyncio.to_thread(self.message_repo.mark_forwarded, parsed_id, forwarded_id)
+                logger.info(
+                    "Forwarded TWAP result: group=%s msg=%s related_source_msg=%s forwarded=%s",
+                    processor.config.name,
+                    message.id,
+                    _message_reply_to_id(message),
+                    forwarded_id,
+                )
+                return
+
+            logger.info(
+                "TWAP result stored without forward: group=%s chat=%s msg=%s reply_to=%s matched_original=%s",
+                processor.config.name,
+                chat_id,
+                message.id,
+                _message_reply_to_id(message),
+                bool(original),
+            )
+            return
 
         if not processor.should_forward(result):
             logger.info(
@@ -136,11 +172,11 @@ class TelegramRuntime:
             )
             return
 
-        forwarded_id = await self._forward(processor, result)
+        forwarded_id = await self._forward_created(processor, result)
         await asyncio.to_thread(self.message_repo.mark_forwarded, parsed_id, forwarded_id)
         logger.info("Forwarded accepted TWAP: group=%s msg=%s forwarded=%s", processor.config.name, message.id, forwarded_id)
 
-    async def _forward(self, processor: GroupProcessor, result) -> int | None:
+    async def _forward_created(self, processor: GroupProcessor, result) -> int | None:
         kwargs: dict[str, Any] = {}
         if processor.config.target_thread_id:
             kwargs["reply_to"] = processor.config.target_thread_id
@@ -148,6 +184,19 @@ class TelegramRuntime:
         sent = await self.client.send_message(
             processor.config.target_chat_id,
             processor.format_forward(result),
+            **kwargs,
+        )
+        return int(sent.id) if sent else None
+
+    async def _forward_result(self, processor: GroupProcessor, result, original: dict[str, Any]) -> int | None:
+        reply_to = original.get("forwarded_message_id") or processor.config.target_thread_id
+        kwargs: dict[str, Any] = {}
+        if reply_to:
+            kwargs["reply_to"] = int(reply_to)
+
+        sent = await self.client.send_message(
+            processor.config.target_chat_id,
+            processor.format_result(result, original),
             **kwargs,
         )
         return int(sent.id) if sent else None
@@ -171,6 +220,17 @@ def _message_thread_id(message: Message) -> int | None:
         if top_id:
             return int(top_id)
 
+        reply_to_id = getattr(reply_to, "reply_to_msg_id", None)
+        if reply_to_id:
+            return int(reply_to_id)
+
+    reply_to_msg_id = getattr(message, "reply_to_msg_id", None)
+    return int(reply_to_msg_id) if reply_to_msg_id else None
+
+
+def _message_reply_to_id(message: Message) -> int | None:
+    reply_to = getattr(message, "reply_to", None)
+    if reply_to:
         reply_to_id = getattr(reply_to, "reply_to_msg_id", None)
         if reply_to_id:
             return int(reply_to_id)
