@@ -35,8 +35,24 @@ class FuturesAsset:
     quote_coin: str | None = None
     min_vol: float | None = None
     max_vol: float | None = None
+    vol_unit: float | None = None
+    contract_size: float | None = None
     min_leverage: int | None = None
     max_leverage: int | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class TradingRules:
+    symbol: str
+    min_volume: float
+    max_volume: float | None = None
+    volume_step: float | None = None
+    contract_size: float | None = None
+    min_leverage: int = 1
+    max_leverage: int = 1
+    price: float | None = None
+    min_notional_usdt: float | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 

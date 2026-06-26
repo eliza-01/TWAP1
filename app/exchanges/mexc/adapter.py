@@ -15,6 +15,7 @@ from app.exchanges.core.types import (
     OpenOrderRequest,
     OrderResult,
     Position,
+    TradingRules,
 )
 from app.exchanges.mexc.client import MexcFuturesClient
 from app.exchanges.mexc.constants import ACCOUNT_ASSET, CONTRACT_DETAIL, OPEN_POSITIONS, SUBMIT_ORDER, TICKER
@@ -67,6 +68,8 @@ class MexcAdapter(ExchangeAdapter):
                     quote_coin=item.get("quoteCoinName") or item.get("quoteCoin"),
                     min_vol=_maybe_float(item.get("minVol")),
                     max_vol=_maybe_float(item.get("maxVol")),
+                    vol_unit=_maybe_float(item.get("volUnit")),
+                    contract_size=_maybe_float(item.get("contractSize")),
                     min_leverage=_maybe_int(item.get("minLeverage")),
                     max_leverage=_maybe_int(item.get("maxLeverage")),
                     raw=item,
@@ -74,9 +77,35 @@ class MexcAdapter(ExchangeAdapter):
             )
         return sorted(assets, key=lambda asset: asset.symbol)
 
+    async def trading_rules(self, symbol: str) -> TradingRules:
+        self._ensure_ready()
+        normalized = _normalize_symbol(symbol)
+        contract = await self._contract_detail(normalized)
+        ticker = await self.client.get(TICKER, {"symbol": normalized})
+        price = _ticker_price(ticker, "buy")
+        min_volume = _maybe_float(contract.get("minVol")) or 0.0
+        max_volume = _maybe_float(contract.get("maxVol"))
+        volume_step = _maybe_float(contract.get("volUnit"))
+        contract_size = _maybe_float(contract.get("contractSize"))
+        min_leverage = _maybe_int(contract.get("minLeverage")) or 1
+        max_leverage = _maybe_int(contract.get("maxLeverage")) or min_leverage
+
+        return TradingRules(
+            symbol=normalized,
+            min_volume=min_volume,
+            max_volume=max_volume,
+            volume_step=volume_step,
+            contract_size=contract_size,
+            min_leverage=min_leverage,
+            max_leverage=max_leverage,
+            price=price,
+            min_notional_usdt=_min_notional(min_volume, contract_size, price),
+            raw={"contract": contract, "ticker": _data(ticker)},
+        )
+
     async def positions(self, symbol: str | None = None) -> list[Position]:
         self._ensure_ready()
-        params = {"symbol": symbol} if symbol else None
+        params = {"symbol": _normalize_symbol(symbol)} if symbol else None
         data = await self.client.get(OPEN_POSITIONS, params)
         positions: list[Position] = []
         for item in _list_data(data):
@@ -113,7 +142,7 @@ class MexcAdapter(ExchangeAdapter):
             "vol": volume,
             "side": 1 if request.direction == "long" else 3,
             "type": 5,
-            "openType": request.open_type,
+            "openType": request.open_type,  # 1 = isolated margin for MEXC Futures.
             "leverage": leverage,
             "externalOid": f"local_{int(time.time() * 1000)}",
         }
@@ -137,7 +166,7 @@ class MexcAdapter(ExchangeAdapter):
             "vol": volume,
             "side": 4 if request.direction == "long" else 2,
             "type": 5,
-            "openType": request.open_type,
+            "openType": request.open_type,  # 1 = isolated margin for MEXC Futures.
         }
         if request.position_id or target.position_id:
             payload["positionId"] = request.position_id or target.position_id
@@ -197,8 +226,8 @@ def _maybe_int(value: Any) -> int | None:
         return None
 
 
-def _normalize_symbol(symbol: str) -> str:
-    clean = symbol.strip().upper()
+def _normalize_symbol(symbol: str | None) -> str:
+    clean = (symbol or "").strip().upper()
     if not clean:
         raise ExchangeRequestError("Не указан futures-символ")
     return clean
@@ -241,13 +270,13 @@ def _normalize_volume(volume: float, contract: dict[str, Any], symbol: str) -> f
     step = _step(contract.get("volUnit"), scale)
 
     if min_vol > 0 and raw < min_vol:
-        raise ExchangeRequestError(f"Минимальный объем для {symbol}: { _plain(min_vol) }")
+        raise ExchangeRequestError(f"Минимальный объем для {symbol}: {_plain(min_vol)}")
     if max_vol > 0 and raw > max_vol:
-        raise ExchangeRequestError(f"Максимальный объем для {symbol}: { _plain(max_vol) }")
+        raise ExchangeRequestError(f"Максимальный объем для {symbol}: {_plain(max_vol)}")
 
     value = _round_to_step(raw, step, ROUND_DOWN)
     if value <= 0 or (min_vol > 0 and value < min_vol):
-        raise ExchangeRequestError(f"Объем должен быть кратен { _plain(step) } и не меньше { _plain(min_vol) }")
+        raise ExchangeRequestError(f"Объем должен быть кратен {_plain(step)} и не меньше {_plain(min_vol)}")
     return _json_number(value, scale)
 
 
@@ -305,3 +334,10 @@ def _find_close_target(positions: list[Position], request: CloseOrderRequest) ->
             if request.position_id is None or position.position_id == request.position_id:
                 return position
     raise ExchangeRequestError(f"Не найдена открытая {request.direction} позиция по {symbol}")
+
+
+def _min_notional(min_volume: float, contract_size: float | None, price: float | None) -> float | None:
+    if not min_volume or not price:
+        return None
+    multiplier = contract_size if contract_size and contract_size > 0 else 1
+    return min_volume * multiplier * price

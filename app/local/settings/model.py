@@ -26,6 +26,8 @@ class LocalTradingSettings:
     default_leverage: int = 1
     default_direction: str = "long"
     auto_trading_enabled: bool = False
+    auto_trading_enabled_at: str = ""
+    use_min_volume: bool = False
 
 
 @dataclass
@@ -61,15 +63,18 @@ def settings_from_dict(data: dict[str, Any]) -> LocalSettings:
 
     trading_raw = data.get("trading") or {}
     signals_raw = data.get("signals") or {}
+    use_min_volume = _bool_value(trading_raw.get("use_min_volume"), False)
 
     return LocalSettings(
         selected_exchange=str(data.get("selected_exchange") or "mexc"),
         exchanges=exchanges,
         trading=LocalTradingSettings(
             default_volume=float(trading_raw.get("default_volume") or 1),
-            default_leverage=int(trading_raw.get("default_leverage") or 1),
+            default_leverage=1 if use_min_volume else int(trading_raw.get("default_leverage") or 1),
             default_direction=str(trading_raw.get("default_direction") or "long"),
-            auto_trading_enabled=bool(trading_raw.get("auto_trading_enabled", False)),
+            auto_trading_enabled=_bool_value(trading_raw.get("auto_trading_enabled"), False),
+            auto_trading_enabled_at=str(trading_raw.get("auto_trading_enabled_at") or ""),
+            use_min_volume=use_min_volume,
         ),
         signals=LocalSignalSettings(
             enabled=_bool_value(signals_raw.get("enabled"), _env_bool("LOCAL_SIGNAL_CLIENT_ENABLED", False)),

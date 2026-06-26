@@ -20,6 +20,8 @@ async def exchange_assets(exchange: str) -> dict:
                 "quote_coin": item.quote_coin,
                 "min_vol": item.min_vol,
                 "max_vol": item.max_vol,
+                "vol_unit": item.vol_unit,
+                "contract_size": item.contract_size,
                 "min_leverage": item.min_leverage,
                 "max_leverage": item.max_leverage,
             }

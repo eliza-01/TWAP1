@@ -11,7 +11,7 @@ def render_page() -> str:
   <style>
     :root { color-scheme: dark; font-family: Arial, sans-serif; }
     body { margin: 0; background: #0d1117; color: #e6edf3; }
-    main { max-width: 1120px; margin: 0 auto; padding: 24px; }
+    main { max-width: 1220px; margin: 0 auto; padding: 24px; }
     h1 { margin: 0 0 16px; }
     details { background: #161b22; border: 1px solid #30363d; border-radius: 12px; margin: 12px 0; padding: 12px 16px; }
     summary { cursor: pointer; font-weight: 700; }
@@ -22,16 +22,23 @@ def render_page() -> str:
     button.danger { background: #da3633; border-color: #da3633; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
-    .status { padding: 10px; border-radius: 10px; background: #0d1117; border: 1px solid #30363d; white-space: pre-wrap; }
+    .status { padding: 10px; border-radius: 10px; background: #0d1117; border: 1px solid #30363d; white-space: pre-wrap; max-height: 360px; overflow: auto; }
     table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    th, td { border-bottom: 1px solid #30363d; padding: 8px; text-align: left; font-size: 13px; }
-    .ok { color: #3fb950; } .bad { color: #f85149; } .muted { color: #8b949e; }
+    th, td { border-bottom: 1px solid #30363d; padding: 8px; text-align: left; font-size: 13px; vertical-align: top; }
+    .ok { color: #3fb950; }
+    .bad { color: #f85149; }
+    .warn { color: #d29922; }
+    .muted { color: #8b949e; }
+    .pill { display: inline-block; border: 1px solid #30363d; border-radius: 999px; padding: 2px 8px; font-size: 12px; }
+    .pill.ok { border-color: #238636; background: rgba(35,134,54,.14); }
+    .pill.bad { border-color: #da3633; background: rgba(218,54,51,.12); }
+    code { background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:1px 4px; }
   </style>
 </head>
 <body>
 <main>
   <h1>TWAP Local Client</h1>
-  <p class=\"muted\">Биржевые токены и пользовательские настройки сохраняются локально в <code>local_data/settings.json</code>.</p>
+  <p class=\"muted\">Биржевые токены, сигналы и сделки сохраняются локально в <code>local_data/</code>.</p>
 
   <details open>
     <summary>1. Биржа и подключение</summary>
@@ -60,13 +67,13 @@ def render_page() -> str:
   <details>
     <summary>2. Futures активы</summary>
     <button class=\"secondary\" onclick=\"loadAssets()\">Загрузить список</button>
-    <table><thead><tr><th>Символ</th><th>Min vol</th><th>Leverage</th></tr></thead><tbody id=\"assets\"></tbody></table>
+    <table><thead><tr><th>Символ</th><th>Min vol</th><th>Шаг</th><th>Плечо</th><th>Contract size</th></tr></thead><tbody id=\"assets\"></tbody></table>
   </details>
 
   <details open>
     <summary>3. Ручная сделка</summary>
     <div class=\"grid\">
-      <div><label>Символ</label><input id=\"symbol\" value=\"BTC_USDT\" /></div>
+      <div><label>Символ</label><input id=\"symbol\" value=\"BTC_USDT\" onblur=\"loadRules()\" /></div>
       <div><label>Направление</label><select id=\"direction\"><option value=\"long\">Long</option><option value=\"short\">Short</option></select></div>
       <div><label>Объем</label><input id=\"volume\" type=\"number\" step=\"0.0001\" value=\"1\" /></div>
       <div><label>Плечо</label><input id=\"leverage\" type=\"number\" min=\"1\" value=\"1\" /></div>
@@ -75,14 +82,50 @@ def render_page() -> str:
       <button onclick=\"openOrder()\">Открыть market</button>
       <button class=\"danger\" onclick=\"closeOrder()\">Закрыть market</button>
       <button class=\"secondary\" onclick=\"loadPositions()\">Позиции</button>
+      <button class=\"secondary\" onclick=\"loadRules()\">Минимальный объем</button>
     </div>
+    <pre id=\"rules\" class=\"status\"></pre>
     <pre id=\"tradeResult\" class=\"status\"></pre>
     <table><thead><tr><th>Символ</th><th>Сторона</th><th>Объем</th><th>Entry</th><th>PnL</th><th>Position ID</th></tr></thead><tbody id=\"positions\"></tbody></table>
   </details>
 
+  <details open>
+    <summary>4. Автоторговля по сигналам</summary>
+    <p class=\"muted\">
+      Автоторговля открывает сделки только по новым <code>accepted twap_created</code> после момента включения.
+      Закрытие выполняется по связанному <code>twap_result</code>. Маржа отправляется как isolated: <code>openType=1</code>.
+    </p>
+    <div class=\"grid\">
+      <div>
+        <label>Автоторговля</label>
+        <select id=\"autoTradingEnabled\"><option value=\"false\">Выключена</option><option value=\"true\">Включена</option></select>
+      </div>
+      <div>
+        <label>Входить минимальным объемом</label>
+        <select id=\"useMinVolume\" onchange=\"applyMinVolumeFlag()\"><option value=\"false\">Нет</option><option value=\"true\">Да, плечо 1x</option></select>
+      </div>
+      <div>
+        <label>Объем по умолчанию</label>
+        <input id=\"autoVolume\" type=\"number\" step=\"0.0001\" value=\"1\" />
+      </div>
+      <div>
+        <label>Плечо по умолчанию</label>
+        <input id=\"autoLeverage\" type=\"number\" min=\"1\" value=\"1\" />
+      </div>
+    </div>
+    <div class=\"row\" style=\"margin-top:10px\">
+      <button onclick=\"saveSettings()\">Сохранить автоторговлю</button>
+      <button class=\"secondary\" onclick=\"loadTradingLogs()\">Обновить логи</button>
+      <button class=\"secondary\" onclick=\"loadOpenTrades()\">Открытые авто-сделки</button>
+    </div>
+    <pre id=\"autoStatus\" class=\"status\"></pre>
+    <table><thead><tr><th>Время</th><th>Тип</th><th>Действие</th><th>Символ</th><th>Сообщение</th></tr></thead><tbody id=\"tradeLogs\"></tbody></table>
+    <table><thead><tr><th>Trade key</th><th>Символ</th><th>Сторона</th><th>Объем</th><th>Плечо</th><th>Открыт</th><th>Order</th></tr></thead><tbody id=\"openTrades\"></tbody></table>
+  </details>
+
   <details>
-    <summary>4. Сервер сигналов</summary>
-    <p class=\"muted\">Если local и signal-server запущены в Docker Compose, используй <code>ws://signal-server:8090/ws/signals</code> и <code>http://signal-server:8090</code>. <code>127.0.0.1</code> внутри local-контейнера указывает на сам local-контейнер.</p>
+    <summary>5. Сервер сигналов</summary>
+    <p class=\"muted\">Если local и signal-server запущены в Docker Compose, используй <code>ws://signal-server:8090/ws/signals</code> и <code>http://signal-server:8090</code>. Для удалённого устройства нужен публичный <code>wss://...</code> и <code>https://...</code>.</p>
     <div class=\"grid\">
       <div><label>WebSocket URL</label><input id=\"serverWs\" placeholder=\"ws://signal-server:8090/ws/signals\" /></div>
       <div><label>HTTP URL</label><input id=\"serverHttp\" placeholder=\"http://signal-server:8090\" /></div>
@@ -96,13 +139,14 @@ def render_page() -> str:
       <button class=\"secondary\" onclick=\"signalStatus()\">Статус</button>
     </div>
     <pre id=\"signalStatus\" class=\"status\"></pre>
-    <table><thead><tr><th>ID</th><th>Актив</th><th>Сторона</th><th>Цена</th><th>Объем</th><th>Источник</th></tr></thead><tbody id=\"signals\"></tbody></table>
+    <table><thead><tr><th>ID</th><th>Тип</th><th>Актив</th><th>Сторона</th><th>Цена</th><th>Объем</th><th>Источник</th></tr></thead><tbody id=\"signals\"></tbody></table>
   </details>
 </main>
 <script>
 let selected = 'mexc';
 const $ = id => document.getElementById(id);
 const show = (id, data) => $(id).textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+const fmt = value => value === null || value === undefined ? '' : value;
 async function api(url, opts = {}) {
   const res = await fetch(url, {headers: {'content-type': 'application/json'}, ...opts});
   const data = await res.json();
@@ -123,48 +167,101 @@ async function init() {
   $('volume').value = settings.trading?.default_volume || 1;
   $('leverage').value = settings.trading?.default_leverage || 1;
   $('direction').value = settings.trading?.default_direction || 'long';
+  $('autoTradingEnabled').value = String(settings.trading?.auto_trading_enabled || false);
+  $('useMinVolume').value = String(settings.trading?.use_min_volume || false);
+  $('autoVolume').value = settings.trading?.default_volume || 1;
+  $('autoLeverage').value = settings.trading?.default_leverage || 1;
+  applyMinVolumeFlag();
   await checkStatus();
   await signalStatus();
   await loadSignals();
+  await loadTradingLogs();
+  await loadOpenTrades();
+}
+function applyMinVolumeFlag() {
+  const useMin = $('useMinVolume').value === 'true';
+  $('autoLeverage').disabled = useMin;
+  if (useMin) $('autoLeverage').value = 1;
 }
 async function saveSettings() {
+  applyMinVolumeFlag();
   const patch = {
     selected_exchange: selected,
     exchanges: { mexc: { enabled: $('mexcEnabled').value === 'true' } },
-    trading: { default_volume: Number($('volume').value), default_leverage: Number($('leverage').value), default_direction: $('direction').value },
+    trading: {
+      default_volume: Number($('autoVolume').value || $('volume').value),
+      default_leverage: $('useMinVolume').value === 'true' ? 1 : Number($('autoLeverage').value || $('leverage').value),
+      default_direction: $('direction').value,
+      auto_trading_enabled: $('autoTradingEnabled').value === 'true',
+      use_min_volume: $('useMinVolume').value === 'true'
+    },
     signals: { enabled: $('signalsEnabled').value === 'true', server_ws_url: $('serverWs').value, server_http_url: $('serverHttp').value }
   };
   if ($('mexcToken').value) patch.exchanges.mexc.auth_token = $('mexcToken').value;
   if ($('deviceToken').value) patch.signals.device_token = $('deviceToken').value;
-  show('status', await api('/api/settings', {method:'PUT', body: JSON.stringify(patch)}));
+  const saved = await api('/api/settings', {method:'PUT', body: JSON.stringify(patch)});
+  show('status', saved);
+  show('autoStatus', saved.trading);
   await signalStatus();
 }
 async function checkStatus() { try { show('status', await api(`/api/exchanges/${selected}/status`)); } catch(e) { show('status', e.message); } }
 async function loadBalance() { try { show('status', await api(`/api/exchanges/${selected}/balance`)); } catch(e) { show('status', e.message); } }
 async function loadAssets() {
   const data = await api(`/api/exchanges/${selected}/futures/assets`);
-  $('assets').innerHTML = data.items.map(x => `<tr><td><button class="secondary" onclick="pickSymbol('${x.symbol}')">${x.symbol}</button></td><td>${x.min_vol ?? ''}</td><td>${x.min_leverage ?? ''}-${x.max_leverage ?? ''}</td></tr>`).join('');
+  $('assets').innerHTML = data.items.map(x => `<tr><td><button class="secondary" onclick="pickSymbol('${x.symbol}')">${x.symbol}</button></td><td>${fmt(x.min_vol)}</td><td>${fmt(x.vol_unit)}</td><td>${fmt(x.min_leverage)}-${fmt(x.max_leverage)}</td><td>${fmt(x.contract_size)}</td></tr>`).join('');
 }
-function pickSymbol(symbol) { $('symbol').value = symbol; }
+async function loadRules(symbol = null) {
+  const current = symbol || $('symbol').value;
+  try {
+    const data = await api(`/api/exchanges/${selected}/futures/rules?symbol=${encodeURIComponent(current)}`);
+    show('rules', {
+      symbol: data.symbol,
+      min_volume: data.min_volume,
+      volume_step: data.volume_step,
+      max_volume: data.max_volume,
+      leverage: `${data.min_leverage}x-${data.max_leverage}x`,
+      price: data.price,
+      min_notional_usdt: data.min_notional_usdt
+    });
+    return data;
+  } catch(e) {
+    show('rules', e.message);
+  }
+}
+async function pickSymbol(symbol) {
+  $('symbol').value = symbol;
+  const rules = await loadRules(symbol);
+  if (rules && $('useMinVolume').value === 'true') $('volume').value = rules.min_volume;
+}
 function orderPayload() { return { symbol: $('symbol').value, direction: $('direction').value, volume: Number($('volume').value), leverage: Number($('leverage').value), open_type: 1 }; }
 async function openOrder() { try { show('tradeResult', await api(`/api/exchanges/${selected}/orders/open`, {method:'POST', body: JSON.stringify(orderPayload())})); await loadPositions(); } catch(e) { show('tradeResult', e.message); } }
 async function closeOrder() { try { show('tradeResult', await api(`/api/exchanges/${selected}/orders/close`, {method:'POST', body: JSON.stringify(orderPayload())})); await loadPositions(); } catch(e) { show('tradeResult', e.message); } }
 async function loadPositions() {
   const data = await api(`/api/exchanges/${selected}/positions`);
-  $('positions').innerHTML = data.items.map(x => `<tr><td>${x.symbol}</td><td>${x.direction}</td><td>${x.volume}</td><td>${x.entry_price ?? ''}</td><td>${x.pnl ?? ''}</td><td>${x.position_id ?? ''}</td></tr>`).join('');
+  $('positions').innerHTML = data.items.map(x => `<tr><td>${x.symbol}</td><td>${x.direction}</td><td>${x.volume}</td><td>${fmt(x.entry_price)}</td><td>${fmt(x.pnl)}</td><td>${fmt(x.position_id)}</td></tr>`).join('');
 }
 async function loadSignals() {
   const data = await api('/api/signals/recent');
-  $('signals').innerHTML = data.items.map(x => `<tr><td>${x.signal_id || x.id || ''}</td><td>${x.asset || x.symbol || ''}</td><td>${x.side || ''}</td><td>${x.price || ''}</td><td>${x.amount_usd || ''}</td><td>${x.source || x.group_name || ''}</td></tr>`).join('');
+  $('signals').innerHTML = data.items.map(x => `<tr><td>${x.signal_id || x.id || ''}</td><td>${x.kind || 'twap_created'}</td><td>${x.asset || x.symbol || ''}</td><td>${x.side || ''}</td><td>${fmt(x.price)}</td><td>${fmt(x.amount_usd)}</td><td>${x.source || x.group_name || ''}</td></tr>`).join('');
 }
 async function syncSignals() {
   try {
     const data = await api('/api/signals/sync', {method:'POST'});
     show('signalStatus', data);
     await loadSignals();
+    await loadTradingLogs();
+    await loadOpenTrades();
   } catch(e) { show('signalStatus', e.message); }
 }
 async function signalStatus() { try { show('signalStatus', await api('/api/signals/status')); } catch(e) { show('signalStatus', e.message); } }
+async function loadTradingLogs() {
+  const data = await api('/api/trading/logs?limit=100');
+  $('tradeLogs').innerHTML = data.items.map(x => `<tr><td>${x.time || ''}</td><td><span class="pill ${x.level === 'success' ? 'ok' : (x.level === 'error' ? 'bad' : '')}">${x.level || ''}</span></td><td>${x.action || ''}</td><td>${x.symbol || ''}</td><td>${x.message || ''}</td></tr>`).join('');
+}
+async function loadOpenTrades() {
+  const data = await api('/api/trading/open-trades');
+  $('openTrades').innerHTML = data.items.map(x => `<tr><td>${x.trade_key || ''}</td><td>${x.symbol || ''}</td><td>${x.direction || ''}</td><td>${x.volume || ''}</td><td>${x.leverage || ''}</td><td>${x.opened_at || ''}</td><td>${x.open_order_id || ''}</td></tr>`).join('');
+}
 init();
 </script>
 </body>

@@ -10,6 +10,7 @@ from app.exchanges.core.types import (
     OpenOrderRequest,
     OrderResult,
     Position,
+    TradingRules,
 )
 
 
@@ -27,6 +28,10 @@ class ExchangeAdapter(ABC):
 
     @abstractmethod
     async def futures_assets(self) -> list[FuturesAsset]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def trading_rules(self, symbol: str) -> TradingRules:
         raise NotImplementedError
 
     @abstractmethod

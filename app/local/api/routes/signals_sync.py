@@ -5,7 +5,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter
 
-from app.local.api.deps import settings_store, signal_store
+from app.local.api.deps import auto_trader, settings_store, signal_store
 
 router = APIRouter(prefix="/api/signals", tags=["signals"])
 
@@ -60,6 +60,7 @@ async def sync_signals(limit: int = 100) -> dict[str, Any]:
         if not isinstance(item, dict):
             continue
         signal_store.add(item)
+        await auto_trader.handle_signal(item)
         saved += 1
         last_signal_id = max(last_signal_id, int(item.get("signal_id") or item.get("id") or 0))
 
@@ -85,4 +86,8 @@ async def signal_status() -> dict[str, Any]:
         "has_device_token": bool(settings.signals.device_token),
         "last_signal_id": settings.signals.last_signal_id,
         "local_recent_count": len(signal_store.list_recent(500)),
+        "auto_trading_enabled": settings.trading.auto_trading_enabled,
+        "auto_trading_enabled_at": settings.trading.auto_trading_enabled_at,
+        "use_min_volume": settings.trading.use_min_volume,
+        "default_leverage": settings.trading.default_leverage,
     }

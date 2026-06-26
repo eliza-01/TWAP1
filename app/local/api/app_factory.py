@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.local.api.deps import settings_store, signal_store
+from app.local.api.deps import auto_trader, settings_store, signal_store
 from app.local.api.routes import (
     exchange_assets,
     exchange_balance,
     exchange_positions,
+    exchange_rules,
     exchange_select,
     exchange_status,
     exchanges_list,
@@ -20,6 +20,7 @@ from app.local.api.routes import (
     settings_save,
     signals_recent,
     signals_sync,
+    trading_logs,
     ui,
 )
 from app.local.signal_client.client import LocalSignalClient
@@ -29,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 def create_local_app() -> FastAPI:
     app = FastAPI(title="TWAP Local Client")
-    signal_client = LocalSignalClient(settings_store, signal_store)
+    signal_client = LocalSignalClient(settings_store, signal_store, auto_trader)
 
     @app.on_event("startup")
     async def _startup() -> None:
@@ -53,11 +54,13 @@ def create_local_app() -> FastAPI:
         exchange_status.router,
         exchange_balance.router,
         exchange_assets.router,
+        exchange_rules.router,
         exchange_positions.router,
         order_open.router,
         order_close.router,
         signals_recent.router,
         signals_sync.router,
+        trading_logs.router,
     ]:
         app.include_router(router)
     return app

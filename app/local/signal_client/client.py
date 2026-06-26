@@ -8,14 +8,21 @@ import websockets
 
 from app.local.settings.store import LocalSettingsStore
 from app.local.signal_client.store import LocalSignalStore
+from app.local.trading.auto_trader import LocalAutoTrader
 
 logger = logging.getLogger(__name__)
 
 
 class LocalSignalClient:
-    def __init__(self, settings_store: LocalSettingsStore, signal_store: LocalSignalStore) -> None:
+    def __init__(
+        self,
+        settings_store: LocalSettingsStore,
+        signal_store: LocalSignalStore,
+        auto_trader: LocalAutoTrader | None = None,
+    ) -> None:
         self.settings_store = settings_store
         self.signal_store = signal_store
+        self.auto_trader = auto_trader
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
 
@@ -68,4 +75,11 @@ class LocalSignalClient:
         signal_id = int(signal.get("signal_id") or signal.get("id") or 0)
         if signal_id:
             self.settings_store.update({"signals": {"last_signal_id": signal_id}})
-            logger.info("Signal saved: id=%s symbol=%s", signal_id, signal.get("symbol") or signal.get("asset"))
+            logger.info(
+                "Signal saved: id=%s kind=%s symbol=%s",
+                signal_id,
+                signal.get("kind"),
+                signal.get("symbol") or signal.get("asset"),
+            )
+        if self.auto_trader is not None:
+            await self.auto_trader.handle_signal(signal)
