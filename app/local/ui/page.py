@@ -85,6 +85,7 @@ def render_page() -> str:
     <p class="muted">
       Автоторговля открывает сделки только по новым <code>twap_created</code> после момента включения.
       По умолчанию берутся только сигналы, прошедшие фильтр. Опция отключения фильтра разрешает вход и по rejected-сигналам.
+      Отдельный флаг может игнорировать только <code>TWAPX_MIN_USD</code>, если <code>TWAPX_MIN_TWAP_SHARE_PERCENT</code> выше заданного порога.
       Закрытие выполняется по связанному <code>twap_result</code>. Маржа isolated: <code>openType=1</code>.
       Объем сделки задаётся в USDT как notional. Если свободной маржи не хватает, клиент подберёт минимальное плечо, но не выше лимита.
     </p>
@@ -96,6 +97,8 @@ def render_page() -> str:
       <div><label>Авто-плечо при нехватке средств</label><select id="autoLeverageEnabled"><option value="true">Да</option><option value="false">Нет</option></select></div>
       <div><label>Максимальное авто-плечо</label><input id="maxAutoLeverage" type="number" min="1" value="20" /></div>
       <div><label>Отключить фильтр сигналов</label><select id="disableSignalFilters"><option value="false">Нет</option><option value="true">Да, входить и по rejected</option></select></div>
+      <div><label>Игнорировать TWAPX_MIN_USD по доле рынка</label><select id="ignoreMinUsdByShare"><option value="false">Нет</option><option value="true">Да, только min USD</option></select></div>
+      <div><label>Порог TWAP share, %</label><input id="minUsdOverrideShare" type="number" step="0.01" min="0.01" value="1" /></div>
     </div>
     <div class="row" style="margin-top:10px">
       <button onclick="saveSettings()">Сохранить автоторговлю</button>
@@ -159,6 +162,8 @@ async function init() {
   $('autoLeverageEnabled').value = String(settings.trading?.auto_leverage_enabled ?? true);
   $('maxAutoLeverage').value = settings.trading?.max_auto_leverage || 20;
   $('disableSignalFilters').value = String(settings.trading?.disable_signal_filters || false);
+  $('ignoreMinUsdByShare').value = String(settings.trading?.ignore_min_usd_by_market_share || false);
+  $('minUsdOverrideShare').value = settings.trading?.min_usd_override_twap_share_percent || 1;
   applyMinVolumeFlag();
   await checkStatus();
   await signalStatus();
@@ -192,7 +197,9 @@ async function saveSettings() {
       auto_order_usdt: Number($('autoOrderUsdt').value || 10),
       auto_leverage_enabled: $('useMinVolume').value === 'true' ? false : $('autoLeverageEnabled').value === 'true',
       max_auto_leverage: $('useMinVolume').value === 'true' ? 1 : Number($('maxAutoLeverage').value || 20),
-      disable_signal_filters: $('disableSignalFilters').value === 'true'
+      disable_signal_filters: $('disableSignalFilters').value === 'true',
+      ignore_min_usd_by_market_share: $('ignoreMinUsdByShare').value === 'true',
+      min_usd_override_twap_share_percent: Number($('minUsdOverrideShare').value || 1)
     },
     signals: { enabled: $('signalsEnabled').value === 'true', server_ws_url: $('serverWs').value, server_http_url: $('serverHttp').value }
   };

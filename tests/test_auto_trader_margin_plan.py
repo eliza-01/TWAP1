@@ -4,7 +4,7 @@ import asyncio
 
 from app.exchanges.core.types import Balance, TradingRules
 from app.local.settings.model import LocalSettings, LocalTradingSettings
-from app.local.trading.auto_trader import _build_open_plan
+from app.local.trading.auto_trader import _build_open_plan, _should_bypass_min_usd_by_share
 
 
 class FakeAdapter:
@@ -60,3 +60,34 @@ def test_order_plan_increases_leverage_when_available_margin_is_low() -> None:
     assert plan.notional_usdt == 20
     assert plan.estimated_margin_usdt == 4
     assert plan.auto_leverage_used is True
+
+def test_min_usd_share_override_allows_only_min_usd_rejection() -> None:
+    settings = LocalSettings(
+        trading=LocalTradingSettings(
+            ignore_min_usd_by_market_share=True,
+            min_usd_override_twap_share_percent=2.5,
+        )
+    )
+
+    assert _should_bypass_min_usd_by_share(
+        settings,
+        {"status": "rejected", "reason": "amount_usd_lt_300000", "twap_share_percent": 2.51},
+    )
+
+
+def test_min_usd_share_override_keeps_other_rejections_blocked() -> None:
+    settings = LocalSettings(
+        trading=LocalTradingSettings(
+            ignore_min_usd_by_market_share=True,
+            min_usd_override_twap_share_percent=2.5,
+        )
+    )
+
+    assert not _should_bypass_min_usd_by_share(
+        settings,
+        {
+            "status": "rejected",
+            "reason": "amount_usd_lt_300000;duration_gt_30_minutes",
+            "twap_share_percent": 5,
+        },
+    )

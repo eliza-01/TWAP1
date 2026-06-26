@@ -32,6 +32,8 @@ class LocalTradingSettings:
     auto_leverage_enabled: bool = True
     max_auto_leverage: int = 20
     disable_signal_filters: bool = False
+    ignore_min_usd_by_market_share: bool = False
+    min_usd_override_twap_share_percent: float = 1.0
 
 
 @dataclass
@@ -88,6 +90,11 @@ def settings_from_dict(data: dict[str, Any]) -> LocalSettings:
             auto_leverage_enabled=False if use_min_volume else _bool_value(trading_raw.get("auto_leverage_enabled"), True),
             max_auto_leverage=1 if use_min_volume else max_auto_leverage,
             disable_signal_filters=_bool_value(trading_raw.get("disable_signal_filters"), False),
+            ignore_min_usd_by_market_share=_bool_value(trading_raw.get("ignore_min_usd_by_market_share"), False),
+            min_usd_override_twap_share_percent=_positive_float(
+                trading_raw.get("min_usd_override_twap_share_percent"),
+                1.0,
+            ),
         ),
         signals=LocalSignalSettings(
             enabled=_bool_value(signals_raw.get("enabled"), _env_bool("LOCAL_SIGNAL_CLIENT_ENABLED", False)),

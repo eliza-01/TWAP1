@@ -1,4 +1,3 @@
-# app/local/api/routes/signals_sync.py
 from __future__ import annotations
 
 from typing import Any
@@ -35,7 +34,7 @@ async def sync_signals(limit: int = 100) -> dict[str, Any]:
                 params={
                     "after_id": after_id,
                     "limit": max(1, min(int(limit), 500)),
-                    "include_rejected": settings.trading.disable_signal_filters,
+                    "include_rejected": settings.trading.disable_signal_filters or settings.trading.ignore_min_usd_by_market_share,
                 },
                 headers=headers,
             )
@@ -98,4 +97,6 @@ async def signal_status() -> dict[str, Any]:
         "default_leverage": settings.trading.default_leverage,
         "auto_order_usdt": settings.trading.auto_order_usdt,
         "disable_signal_filters": settings.trading.disable_signal_filters,
+        "ignore_min_usd_by_market_share": settings.trading.ignore_min_usd_by_market_share,
+        "min_usd_override_twap_share_percent": settings.trading.min_usd_override_twap_share_percent,
     }

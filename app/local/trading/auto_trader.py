@@ -52,22 +52,32 @@ class LocalAutoTrader:
 
         kind = str(signal.get("kind") or "twap_created")
         status = str(signal.get("status") or "accepted")
-        if kind == "twap_created" and status != "accepted" and not settings.trading.disable_signal_filters:
-            self.trade_store.add_log(
-                "info",
-                "skip_filtered_signal",
-                f"Сигнал пропущен фильтром: status={status}, reason={signal.get('reason') or 'n/a'}",
-                signal,
-            )
-            self.trade_store.mark_signal_processed(signal_id)
-            return
-        if kind == "twap_created" and status != "accepted" and settings.trading.disable_signal_filters:
-            self.trade_store.add_log(
-                "warning",
-                "filter_disabled",
-                f"Фильтр сигналов отключен: вход по status={status}, reason={signal.get('reason') or 'n/a'}",
-                signal,
-            )
+        if kind == "twap_created" and status != "accepted":
+            if settings.trading.disable_signal_filters:
+                self.trade_store.add_log(
+                    "warning",
+                    "filter_disabled",
+                    f"Фильтр сигналов отключен: вход по status={status}, reason={signal.get('reason') or 'n/a'}",
+                    signal,
+                )
+            elif _should_bypass_min_usd_by_share(settings, signal):
+                share = _signal_share_percent(signal)
+                threshold = settings.trading.min_usd_override_twap_share_percent
+                self.trade_store.add_log(
+                    "warning",
+                    "min_usd_bypassed_by_share",
+                    f"TWAPX_MIN_USD проигнорирован: TWAP share={_fmt(share)}% > {_fmt(threshold)}%",
+                    signal,
+                )
+            else:
+                self.trade_store.add_log(
+                    "info",
+                    "skip_filtered_signal",
+                    f"Сигнал пропущен фильтром: status={status}, reason={signal.get('reason') or 'n/a'}",
+                    signal,
+                )
+                self.trade_store.mark_signal_processed(signal_id)
+                return
 
         try:
             if kind == "twap_created":
@@ -270,6 +280,45 @@ async def _build_open_plan(settings: LocalSettings, adapter: Any, symbol: str, r
         min_volume_used=min_volume_used,
         available_margin_usdt=available,
     )
+
+
+def _should_bypass_min_usd_by_share(settings: LocalSettings, signal: dict[str, Any]) -> bool:
+    if not settings.trading.ignore_min_usd_by_market_share:
+        return False
+
+    reasons = _signal_reasons(signal)
+    if not reasons or not any(reason.startswith("amount_usd_lt_") for reason in reasons):
+        return False
+
+    hard_reasons = [reason for reason in reasons if not reason.startswith("amount_usd_lt_")]
+    if hard_reasons:
+        return False
+
+    threshold = float(settings.trading.min_usd_override_twap_share_percent or 0)
+    if threshold <= 0:
+        return False
+
+    share = _signal_share_percent(signal)
+    return share is not None and share > threshold
+
+
+def _signal_reasons(signal: dict[str, Any]) -> list[str]:
+    reason = str(signal.get("reason") or "")
+    return [item.strip() for item in reason.split(";") if item.strip()]
+
+
+def _signal_share_percent(signal: dict[str, Any]) -> float | None:
+    value = signal.get("twap_share_percent")
+    if value is None and isinstance(signal.get("payload"), dict):
+        value = signal["payload"].get("twap_share_percent")
+    return _float_or_none(value)
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _signal_id(signal: dict[str, Any]) -> int | None:
