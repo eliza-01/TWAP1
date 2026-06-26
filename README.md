@@ -3,6 +3,9 @@ docker compose up -d mysql phpmyadmin app
 docker compose --profile local up -d local
 docker compose --profile server up -d signal-server
 
+docker compose --profile server --profile local build --no-cache signal-server local
+docker compose --profile server up -d --force-recreate signal-server
+docker compose --profile local up -d --force-recreate local
 
 Локальный клиент:
 docker compose --profile local up -d local

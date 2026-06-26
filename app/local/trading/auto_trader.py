@@ -1,16 +1,34 @@
 from __future__ import annotations
 
 import logging
+import math
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from app.exchanges.core.errors import ExchangeError
-from app.exchanges.core.types import CloseOrderRequest, OpenOrderRequest
+from app.exchanges.core.types import CloseOrderRequest, OpenOrderRequest, TradingRules
 from app.exchanges.registry import get_exchange
+from app.local.settings.model import LocalSettings
 from app.local.settings.store import LocalSettingsStore
 from app.local.trading.log_store import LocalTradeStore
 
 logger = logging.getLogger(__name__)
+_MARGIN_SAFETY = 0.98
+
+
+@dataclass(frozen=True)
+class OpenPlan:
+    volume: float
+    leverage: int
+    target_order_usdt: float
+    estimated_margin_usdt: float
+    notional_usdt: float
+    price: float
+    contract_size: float
+    auto_leverage_used: bool
+    min_volume_used: bool
+    available_margin_usdt: float
 
 
 class LocalAutoTrader:
@@ -33,6 +51,24 @@ class LocalAutoTrader:
             return
 
         kind = str(signal.get("kind") or "twap_created")
+        status = str(signal.get("status") or "accepted")
+        if kind == "twap_created" and status != "accepted" and not settings.trading.disable_signal_filters:
+            self.trade_store.add_log(
+                "info",
+                "skip_filtered_signal",
+                f"Сигнал пропущен фильтром: status={status}, reason={signal.get('reason') or 'n/a'}",
+                signal,
+            )
+            self.trade_store.mark_signal_processed(signal_id)
+            return
+        if kind == "twap_created" and status != "accepted" and settings.trading.disable_signal_filters:
+            self.trade_store.add_log(
+                "warning",
+                "filter_disabled",
+                f"Фильтр сигналов отключен: вход по status={status}, reason={signal.get('reason') or 'n/a'}",
+                signal,
+            )
+
         try:
             if kind == "twap_created":
                 await self._open_from_signal(signal)
@@ -54,18 +90,18 @@ class LocalAutoTrader:
         direction = _direction_from_signal(signal)
         rules = await adapter.trading_rules(symbol)
 
-        if settings.trading.use_min_volume:
-            volume = rules.min_volume
-            leverage = 1
-        else:
-            volume = settings.trading.default_volume
-            leverage = settings.trading.default_leverage
+        try:
+            plan = await _build_open_plan(settings, adapter, symbol, rules)
+        except ExchangeError as exc:
+            self.trade_store.add_log("warning", "open_skipped", f"Сделка {symbol} не открыта: {exc}", signal)
+            logger.warning("Auto open skipped: signal=%s symbol=%s error=%s", signal.get("signal_id"), symbol, exc)
+            return
 
         request = OpenOrderRequest(
             symbol=symbol,
             direction=direction,
-            volume=volume,
-            leverage=leverage,
+            volume=plan.volume,
+            leverage=plan.leverage,
             open_type=1,  # isolated margin
         )
 
@@ -84,9 +120,17 @@ class LocalAutoTrader:
             "exchange": settings.selected_exchange,
             "symbol": symbol,
             "direction": direction,
-            "volume": volume,
-            "leverage": leverage,
+            "volume": plan.volume,
+            "leverage": plan.leverage,
             "open_type": 1,
+            "margin_mode": "isolated",
+            "target_order_usdt": plan.target_order_usdt,
+            "estimated_margin_usdt": plan.estimated_margin_usdt,
+            "notional_usdt": plan.notional_usdt,
+            "price": plan.price,
+            "contract_size": plan.contract_size,
+            "auto_leverage_used": plan.auto_leverage_used,
+            "min_volume_used": plan.min_volume_used,
             "open_order_id": result.order_id,
             "open_raw": result.raw,
         }
@@ -94,7 +138,7 @@ class LocalAutoTrader:
         self.trade_store.add_log(
             "success",
             "opened",
-            f"Открыта {direction} сделка {symbol}, volume={volume}, leverage={leverage}x, isolated",
+            _open_message(direction, symbol, plan),
             signal,
             saved,
             result.raw,
@@ -133,11 +177,99 @@ class LocalAutoTrader:
         self.trade_store.add_log(
             "success",
             "closed",
-            f"Закрыта {trade.get('direction')} сделка {trade.get('symbol')}, volume={trade.get('volume')}",
+            f"Закрыта {trade.get('direction')} сделка {trade.get('symbol')}, volume={trade.get('volume')}, margin≈{_fmt(trade.get('estimated_margin_usdt'))} USDT",
             signal,
             closed or trade,
             result.raw,
         )
+
+
+async def _build_open_plan(settings: LocalSettings, adapter: Any, symbol: str, rules: TradingRules) -> OpenPlan:
+    price = float(rules.price or 0)
+    if price <= 0:
+        raise ExchangeError(f"Нет текущей цены для {symbol}")
+
+    contract_size = float(rules.contract_size or 1)
+    if contract_size <= 0:
+        contract_size = 1
+
+    min_volume = float(rules.min_volume or 0)
+    if min_volume <= 0:
+        raise ExchangeError(f"MEXC не вернула минимальный объем для {symbol}")
+
+    balance = await adapter.balance("USDT")
+    available = float(balance.available or 0)
+    spendable = available * _MARGIN_SAFETY
+    if spendable <= 0:
+        raise ExchangeError("Нет доступной USDT-маржи")
+
+    if settings.trading.use_min_volume:
+        notional = _notional(min_volume, price, contract_size)
+        margin = notional
+        if margin > spendable:
+            raise ExchangeError(f"Недостаточно маржи для min volume: нужно ≈{_fmt(margin)} USDT, доступно ≈{_fmt(available)} USDT")
+        return OpenPlan(
+            volume=min_volume,
+            leverage=1,
+            target_order_usdt=notional,
+            estimated_margin_usdt=margin,
+            notional_usdt=notional,
+            price=price,
+            contract_size=contract_size,
+            auto_leverage_used=False,
+            min_volume_used=True,
+            available_margin_usdt=available,
+        )
+
+    base_leverage = _clamp_int(settings.trading.default_leverage, rules.min_leverage, rules.max_leverage)
+    max_auto_leverage = _clamp_int(settings.trading.max_auto_leverage, rules.min_leverage, rules.max_leverage)
+    target_notional = float(settings.trading.auto_order_usdt or 0)
+    if target_notional <= 0:
+        raise ExchangeError("Объем сделки должен быть больше 0 USDT")
+    min_notional = _notional(min_volume, price, contract_size)
+    min_volume_used = False
+    if target_notional < min_notional:
+        target_notional = min_notional
+        min_volume_used = True
+
+    leverage = base_leverage
+    margin_required = target_notional / leverage
+    auto_used = False
+
+    if margin_required > spendable:
+        if not settings.trading.auto_leverage_enabled:
+            raise ExchangeError(f"Недостаточно маржи: нужно ≈{_fmt(margin_required)} USDT, доступно ≈{_fmt(available)} USDT")
+        required = math.ceil(target_notional / spendable)
+        leverage = max(base_leverage, required, int(rules.min_leverage or 1))
+        max_allowed = max_auto_leverage or int(rules.max_leverage or leverage)
+        if leverage > max_allowed:
+            raise ExchangeError(
+                f"Недостаточно маржи даже с авто-плечом: нужно {leverage}x, максимум {max_allowed}x"
+            )
+        margin_required = target_notional / leverage
+        auto_used = leverage != base_leverage
+
+    if margin_required > spendable:
+        raise ExchangeError(f"Недостаточно маржи: нужно ≈{_fmt(margin_required)} USDT, доступно ≈{_fmt(available)} USDT")
+
+    volume = target_notional / (price * contract_size)
+    if min_volume_used and volume < min_volume:
+        volume = min_volume
+    if rules.max_volume and volume > rules.max_volume:
+        raise ExchangeError(f"Расчетный объем {volume:g} выше максимального {rules.max_volume:g} для {symbol}")
+
+    return OpenPlan(
+        volume=volume,
+        leverage=leverage,
+        target_order_usdt=target_notional,
+        estimated_margin_usdt=margin_required,
+        notional_usdt=target_notional,
+        price=price,
+        contract_size=contract_size,
+        auto_leverage_used=auto_used,
+        min_volume_used=min_volume_used,
+        available_margin_usdt=available,
+    )
 
 
 def _signal_id(signal: dict[str, Any]) -> int | None:
@@ -199,3 +331,35 @@ def _is_before_enabled_at(signal: dict[str, Any], enabled_at: str) -> bool:
     if enabled_dt.tzinfo is None:
         enabled_dt = enabled_dt.replace(tzinfo=timezone.utc)
     return signal_dt < enabled_dt
+
+
+def _notional(volume: float, price: float, contract_size: float) -> float:
+    return volume * price * contract_size
+
+
+def _clamp_int(value: int, minimum: int, maximum: int) -> int:
+    low = int(minimum or 1)
+    high = int(maximum or low)
+    parsed = int(value or low)
+    return max(low, min(parsed, high))
+
+
+def _open_message(direction: str, symbol: str, plan: OpenPlan) -> str:
+    suffix: list[str] = []
+    if plan.auto_leverage_used:
+        suffix.append("авто-плечо")
+    if plan.min_volume_used:
+        suffix.append("min volume")
+    tail = f" ({', '.join(suffix)})" if suffix else ""
+    return (
+        f"Открыта {direction} сделка {symbol}: volume≈{_fmt(plan.notional_usdt)} USDT, "
+        f"margin≈{_fmt(plan.estimated_margin_usdt)} USDT, contracts={plan.volume:g}, "
+        f"leverage={plan.leverage}x, isolated{tail}"
+    )
+
+
+def _fmt(value: Any) -> str:
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return "0.00"

@@ -1,3 +1,4 @@
+# app/local/api/routes/signals_sync.py
 from __future__ import annotations
 
 from typing import Any
@@ -31,7 +32,11 @@ async def sync_signals(limit: int = 100) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.get(
                 url,
-                params={"after_id": after_id, "limit": max(1, min(int(limit), 500))},
+                params={
+                    "after_id": after_id,
+                    "limit": max(1, min(int(limit), 500)),
+                    "include_rejected": settings.trading.disable_signal_filters,
+                },
                 headers=headers,
             )
             response.raise_for_status()
@@ -81,6 +86,7 @@ async def signal_status() -> dict[str, Any]:
     settings = settings_store.load()
     return {
         "enabled": settings.signals.enabled,
+        "mode": "websocket_only",
         "server_ws_url": settings.signals.server_ws_url,
         "server_http_url": settings.signals.server_http_url,
         "has_device_token": bool(settings.signals.device_token),
@@ -90,4 +96,6 @@ async def signal_status() -> dict[str, Any]:
         "auto_trading_enabled_at": settings.trading.auto_trading_enabled_at,
         "use_min_volume": settings.trading.use_min_volume,
         "default_leverage": settings.trading.default_leverage,
+        "auto_order_usdt": settings.trading.auto_order_usdt,
+        "disable_signal_filters": settings.trading.disable_signal_filters,
     }

@@ -28,6 +28,10 @@ class LocalTradingSettings:
     auto_trading_enabled: bool = False
     auto_trading_enabled_at: str = ""
     use_min_volume: bool = False
+    auto_order_usdt: float = 10.0
+    auto_leverage_enabled: bool = True
+    max_auto_leverage: int = 20
+    disable_signal_filters: bool = False
 
 
 @dataclass
@@ -64,17 +68,26 @@ def settings_from_dict(data: dict[str, Any]) -> LocalSettings:
     trading_raw = data.get("trading") or {}
     signals_raw = data.get("signals") or {}
     use_min_volume = _bool_value(trading_raw.get("use_min_volume"), False)
+    max_auto_leverage = _positive_int(trading_raw.get("max_auto_leverage"), 20)
+    auto_order_usdt = _positive_float(
+        trading_raw.get("auto_order_usdt", trading_raw.get("auto_margin_usdt")),
+        10,
+    )
 
     return LocalSettings(
         selected_exchange=str(data.get("selected_exchange") or "mexc"),
         exchanges=exchanges,
         trading=LocalTradingSettings(
-            default_volume=float(trading_raw.get("default_volume") or 1),
-            default_leverage=1 if use_min_volume else int(trading_raw.get("default_leverage") or 1),
+            default_volume=_positive_float(trading_raw.get("default_volume"), 1),
+            default_leverage=1 if use_min_volume else _positive_int(trading_raw.get("default_leverage"), 1),
             default_direction=str(trading_raw.get("default_direction") or "long"),
             auto_trading_enabled=_bool_value(trading_raw.get("auto_trading_enabled"), False),
             auto_trading_enabled_at=str(trading_raw.get("auto_trading_enabled_at") or ""),
             use_min_volume=use_min_volume,
+            auto_order_usdt=auto_order_usdt,
+            auto_leverage_enabled=False if use_min_volume else _bool_value(trading_raw.get("auto_leverage_enabled"), True),
+            max_auto_leverage=1 if use_min_volume else max_auto_leverage,
+            disable_signal_filters=_bool_value(trading_raw.get("disable_signal_filters"), False),
         ),
         signals=LocalSignalSettings(
             enabled=_bool_value(signals_raw.get("enabled"), _env_bool("LOCAL_SIGNAL_CLIENT_ENABLED", False)),
@@ -107,3 +120,19 @@ def _bool_value(value: Any, default: bool) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "y", "on"}
     return bool(value)
+
+
+def _positive_float(value: Any, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _positive_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default

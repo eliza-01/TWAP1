@@ -21,6 +21,8 @@ async def save_settings(patch: dict[str, Any] = Body(...)) -> dict:
             trading_patch["auto_trading_enabled_at"] = datetime.now(timezone.utc).isoformat()
         if _to_bool(trading_patch.get("use_min_volume")):
             trading_patch["default_leverage"] = 1
+            trading_patch["auto_leverage_enabled"] = False
+            trading_patch["max_auto_leverage"] = 1
 
     settings = settings_store.update(patch)
     return settings.to_dict(hide_secrets=True)

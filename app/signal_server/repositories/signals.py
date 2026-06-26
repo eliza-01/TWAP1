@@ -7,7 +7,7 @@ from app.db.connection import db_cursor
 
 
 class SignalRepository:
-    def list_pending(self, after_id: int = 0, limit: int = 100) -> list[dict[str, Any]]:
+    def list_pending(self, after_id: int = 0, limit: int = 100, include_rejected: bool = False) -> list[dict[str, Any]]:
         with db_cursor(dictionary=True) as cursor:
             cursor.execute(
                 """
@@ -26,6 +26,8 @@ class SignalRepository:
                     ts.user_address,
                     ts.twap_id,
                     ts.payload_json,
+                    pm.status,
+                    pm.reason,
                     pm.related_parsed_message_id,
                     orig_ts.id AS related_signal_id,
                     orig_ts.asset AS original_asset,
@@ -43,11 +45,11 @@ class SignalRepository:
                 LEFT JOIN twap_signals orig_ts ON orig_ts.parsed_message_id = pm.related_parsed_message_id
                 WHERE ts.id > %s
                   AND ts.kind IN ('twap_created', 'twap_result')
-                  AND pm.status = 'accepted'
+                  AND (pm.status = 'accepted' OR (%s AND pm.status = 'rejected' AND ts.kind = 'twap_created'))
                 ORDER BY ts.id ASC
                 LIMIT %s
                 """,
-                (after_id, limit),
+                (after_id, include_rejected, limit),
             )
             rows = cursor.fetchall()
         return [_normalize(row) for row in rows]
@@ -65,6 +67,8 @@ def _normalize(row: dict[str, Any]) -> dict[str, Any]:
         "kind": kind,
         "source": row.get("group_name"),
         "group_name": row.get("group_name"),
+        "status": row.get("status"),
+        "reason": row.get("reason"),
         "asset": asset,
         "symbol": _symbol(asset),
         "side": side,

@@ -3,10 +3,10 @@ from __future__ import annotations
 
 def render_page() -> str:
     return """<!doctype html>
-<html lang=\"ru\">
+<html lang="ru">
 <head>
-  <meta charset=\"utf-8\" />
-  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>TWAP Local Client</title>
   <style>
     :root { color-scheme: dark; font-family: Arial, sans-serif; }
@@ -38,108 +38,92 @@ def render_page() -> str:
 <body>
 <main>
   <h1>TWAP Local Client</h1>
-  <p class=\"muted\">Биржевые токены, сигналы и сделки сохраняются локально в <code>local_data/</code>.</p>
+  <p class="muted">Биржевые токены, сигналы и сделки сохраняются локально в <code>local_data/</code>.</p>
 
   <details open>
     <summary>1. Биржа и подключение</summary>
-    <div class=\"grid\">
-      <div>
-        <label>Биржа</label>
-        <select id=\"exchange\"></select>
-      </div>
-      <div>
-        <label>MEXC WEB token</label>
-        <input id=\"mexcToken\" placeholder=\"WEB...\" type=\"password\" />
-      </div>
-      <div>
-        <label>Включить MEXC</label>
-        <select id=\"mexcEnabled\"><option value=\"true\">Да</option><option value=\"false\">Нет</option></select>
-      </div>
+    <div class="grid">
+      <div><label>Биржа</label><select id="exchange"></select></div>
+      <div><label>MEXC WEB token</label><input id="mexcToken" placeholder="WEB..." type="password" /></div>
+      <div><label>Включить MEXC</label><select id="mexcEnabled"><option value="true">Да</option><option value="false">Нет</option></select></div>
     </div>
-    <div class=\"row\" style=\"margin-top:10px\">
-      <button onclick=\"saveSettings()\">Сохранить настройки</button>
-      <button class=\"secondary\" onclick=\"checkStatus()\">Проверить подключение</button>
-      <button class=\"secondary\" onclick=\"loadBalance()\">Баланс</button>
+    <div class="row" style="margin-top:10px">
+      <button onclick="saveSettings()">Сохранить настройки</button>
+      <button class="secondary" onclick="checkStatus()">Проверить подключение</button>
+      <button class="secondary" onclick="loadBalance()">Баланс</button>
     </div>
-    <pre id=\"status\" class=\"status\"></pre>
+    <pre id="status" class="status"></pre>
   </details>
 
   <details>
     <summary>2. Futures активы</summary>
-    <button class=\"secondary\" onclick=\"loadAssets()\">Загрузить список</button>
-    <table><thead><tr><th>Символ</th><th>Min vol</th><th>Шаг</th><th>Плечо</th><th>Contract size</th></tr></thead><tbody id=\"assets\"></tbody></table>
+    <button class="secondary" onclick="loadAssets()">Загрузить список</button>
+    <table><thead><tr><th>Символ</th><th>Min vol</th><th>Шаг</th><th>Плечо</th><th>Contract size</th></tr></thead><tbody id="assets"></tbody></table>
   </details>
 
   <details open>
     <summary>3. Ручная сделка</summary>
-    <div class=\"grid\">
-      <div><label>Символ</label><input id=\"symbol\" value=\"BTC_USDT\" onblur=\"loadRules()\" /></div>
-      <div><label>Направление</label><select id=\"direction\"><option value=\"long\">Long</option><option value=\"short\">Short</option></select></div>
-      <div><label>Объем</label><input id=\"volume\" type=\"number\" step=\"0.0001\" value=\"1\" /></div>
-      <div><label>Плечо</label><input id=\"leverage\" type=\"number\" min=\"1\" value=\"1\" /></div>
+    <div class="grid">
+      <div><label>Символ</label><input id="symbol" value="BTC_USDT" onblur="loadRules()" /></div>
+      <div><label>Направление</label><select id="direction"><option value="long">Long</option><option value="short">Short</option></select></div>
+      <div><label>Объем</label><input id="volume" type="number" step="0.0001" value="1" /></div>
+      <div><label>Плечо</label><input id="leverage" type="number" min="1" value="1" /></div>
     </div>
-    <div class=\"row\" style=\"margin-top:10px\">
-      <button onclick=\"openOrder()\">Открыть market</button>
-      <button class=\"danger\" onclick=\"closeOrder()\">Закрыть market</button>
-      <button class=\"secondary\" onclick=\"loadPositions()\">Позиции</button>
-      <button class=\"secondary\" onclick=\"loadRules()\">Минимальный объем</button>
+    <div class="row" style="margin-top:10px">
+      <button onclick="openOrder()">Открыть market</button>
+      <button class="danger" onclick="closeOrder()">Закрыть market</button>
+      <button class="secondary" onclick="loadPositions()">Позиции</button>
+      <button class="secondary" onclick="loadRules()">Минимальный объем</button>
     </div>
-    <pre id=\"rules\" class=\"status\"></pre>
-    <pre id=\"tradeResult\" class=\"status\"></pre>
-    <table><thead><tr><th>Символ</th><th>Сторона</th><th>Объем</th><th>Entry</th><th>PnL</th><th>Position ID</th></tr></thead><tbody id=\"positions\"></tbody></table>
+    <pre id="rules" class="status"></pre>
+    <pre id="tradeResult" class="status"></pre>
+    <table><thead><tr><th>Символ</th><th>Сторона</th><th>Объем</th><th>Entry</th><th>PnL</th><th>Position ID</th></tr></thead><tbody id="positions"></tbody></table>
   </details>
 
   <details open>
     <summary>4. Автоторговля по сигналам</summary>
-    <p class=\"muted\">
-      Автоторговля открывает сделки только по новым <code>accepted twap_created</code> после момента включения.
-      Закрытие выполняется по связанному <code>twap_result</code>. Маржа отправляется как isolated: <code>openType=1</code>.
+    <p class="muted">
+      Автоторговля открывает сделки только по новым <code>twap_created</code> после момента включения.
+      По умолчанию берутся только сигналы, прошедшие фильтр. Опция отключения фильтра разрешает вход и по rejected-сигналам.
+      Закрытие выполняется по связанному <code>twap_result</code>. Маржа isolated: <code>openType=1</code>.
+      Объем сделки задаётся в USDT как notional. Если свободной маржи не хватает, клиент подберёт минимальное плечо, но не выше лимита.
     </p>
-    <div class=\"grid\">
-      <div>
-        <label>Автоторговля</label>
-        <select id=\"autoTradingEnabled\"><option value=\"false\">Выключена</option><option value=\"true\">Включена</option></select>
-      </div>
-      <div>
-        <label>Входить минимальным объемом</label>
-        <select id=\"useMinVolume\" onchange=\"applyMinVolumeFlag()\"><option value=\"false\">Нет</option><option value=\"true\">Да, плечо 1x</option></select>
-      </div>
-      <div>
-        <label>Объем по умолчанию</label>
-        <input id=\"autoVolume\" type=\"number\" step=\"0.0001\" value=\"1\" />
-      </div>
-      <div>
-        <label>Плечо по умолчанию</label>
-        <input id=\"autoLeverage\" type=\"number\" min=\"1\" value=\"1\" />
-      </div>
+    <div class="grid">
+      <div><label>Автоторговля</label><select id="autoTradingEnabled"><option value="false">Выключена</option><option value="true">Включена</option></select></div>
+      <div><label>Входить минимальным объемом</label><select id="useMinVolume" onchange="applyMinVolumeFlag()"><option value="false">Нет</option><option value="true">Да, плечо 1x</option></select></div>
+      <div><label>Объем сделки, USDT</label><input id="autoOrderUsdt" type="number" step="0.01" min="0.01" value="10" /></div>
+      <div><label>Базовое плечо</label><input id="autoLeverage" type="number" min="1" value="1" /></div>
+      <div><label>Авто-плечо при нехватке средств</label><select id="autoLeverageEnabled"><option value="true">Да</option><option value="false">Нет</option></select></div>
+      <div><label>Максимальное авто-плечо</label><input id="maxAutoLeverage" type="number" min="1" value="20" /></div>
+      <div><label>Отключить фильтр сигналов</label><select id="disableSignalFilters"><option value="false">Нет</option><option value="true">Да, входить и по rejected</option></select></div>
     </div>
-    <div class=\"row\" style=\"margin-top:10px\">
-      <button onclick=\"saveSettings()\">Сохранить автоторговлю</button>
-      <button class=\"secondary\" onclick=\"loadTradingLogs()\">Обновить логи</button>
-      <button class=\"secondary\" onclick=\"loadOpenTrades()\">Открытые авто-сделки</button>
+    <div class="row" style="margin-top:10px">
+      <button onclick="saveSettings()">Сохранить автоторговлю</button>
+      <button class="secondary" onclick="loadTradingLogs()">Обновить логи</button>
+      <button class="secondary" onclick="loadOpenTrades()">Открытые авто-сделки</button>
     </div>
-    <pre id=\"autoStatus\" class=\"status\"></pre>
-    <table><thead><tr><th>Время</th><th>Тип</th><th>Действие</th><th>Символ</th><th>Сообщение</th></tr></thead><tbody id=\"tradeLogs\"></tbody></table>
-    <table><thead><tr><th>Trade key</th><th>Символ</th><th>Сторона</th><th>Объем</th><th>Плечо</th><th>Открыт</th><th>Order</th></tr></thead><tbody id=\"openTrades\"></tbody></table>
+    <pre id="autoStatus" class="status"></pre>
+    <table><thead><tr><th>Время</th><th>Тип</th><th>Действие</th><th>Символ</th><th>Сообщение</th></tr></thead><tbody id="tradeLogs"></tbody></table>
+    <table><thead><tr><th>Trade key</th><th>Символ</th><th>Сторона</th><th>Маржа</th><th>Объем USDT</th><th>Контракты</th><th>Плечо</th><th>Открыт</th><th>Order</th></tr></thead><tbody id="openTrades"></tbody></table>
   </details>
 
   <details>
     <summary>5. Сервер сигналов</summary>
-    <p class=\"muted\">Если local и signal-server запущены в Docker Compose, используй <code>ws://signal-server:8090/ws/signals</code> и <code>http://signal-server:8090</code>. Для удалённого устройства нужен публичный <code>wss://...</code> и <code>https://...</code>.</p>
-    <div class=\"grid\">
-      <div><label>WebSocket URL</label><input id=\"serverWs\" placeholder=\"ws://signal-server:8090/ws/signals\" /></div>
-      <div><label>HTTP URL</label><input id=\"serverHttp\" placeholder=\"http://signal-server:8090\" /></div>
-      <div><label>Device token</label><input id=\"deviceToken\" type=\"password\" /></div>
-      <div><label>Слушать сигналы</label><select id=\"signalsEnabled\"><option value=\"true\">Да</option><option value=\"false\">Нет</option></select></div>
+    <p class="muted">Если local и signal-server запущены в Docker Compose, используй <code>ws://signal-server:8090/ws/signals</code> и <code>http://signal-server:8090</code>. Для удалённого устройства нужен публичный <code>wss://...</code> и <code>https://...</code>.</p>
+    <div class="grid">
+      <div><label>WebSocket URL</label><input id="serverWs" placeholder="ws://signal-server:8090/ws/signals" /></div>
+      <div><label>HTTP URL</label><input id="serverHttp" placeholder="http://signal-server:8090" /></div>
+      <div><label>Device token</label><input id="deviceToken" type="password" /></div>
+      <div><label>Слушать сигналы</label><select id="signalsEnabled"><option value="true">Да</option><option value="false">Нет</option></select></div>
     </div>
-    <div class=\"row\" style=\"margin-top:10px\">
-      <button onclick=\"saveSettings()\">Сохранить</button>
-      <button class=\"secondary\" onclick=\"syncSignals()\">Синхронизировать с сервера</button>
-      <button class=\"secondary\" onclick=\"loadSignals()\">Последние локальные</button>
-      <button class=\"secondary\" onclick=\"signalStatus()\">Статус</button>
+    <div class="row" style="margin-top:10px">
+      <button onclick="saveSettings()">Сохранить</button>
+      <button class="secondary" onclick="syncSignals()">Синхронизировать с сервера</button>
+      <button class="secondary" onclick="loadSignals()">Последние локальные</button>
+      <button class="secondary" onclick="signalStatus()">Статус</button>
     </div>
-    <pre id=\"signalStatus\" class=\"status\"></pre>
-    <table><thead><tr><th>ID</th><th>Тип</th><th>Актив</th><th>Сторона</th><th>Цена</th><th>Объем</th><th>Источник</th></tr></thead><tbody id=\"signals\"></tbody></table>
+    <pre id="signalStatus" class="status"></pre>
+    <table><thead><tr><th>ID</th><th>Тип</th><th>Актив</th><th>Сторона</th><th>Цена</th><th>Объем</th><th>Источник</th></tr></thead><tbody id="signals"></tbody></table>
   </details>
 </main>
 <script>
@@ -147,6 +131,7 @@ let selected = 'mexc';
 const $ = id => document.getElementById(id);
 const show = (id, data) => $(id).textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
 const fmt = value => value === null || value === undefined ? '' : value;
+const fmtMoney = value => value === null || value === undefined || value === '' ? '' : `$${Number(value).toFixed(2)}`;
 async function api(url, opts = {}) {
   const res = await fetch(url, {headers: {'content-type': 'application/json'}, ...opts});
   const data = await res.json();
@@ -169,8 +154,11 @@ async function init() {
   $('direction').value = settings.trading?.default_direction || 'long';
   $('autoTradingEnabled').value = String(settings.trading?.auto_trading_enabled || false);
   $('useMinVolume').value = String(settings.trading?.use_min_volume || false);
-  $('autoVolume').value = settings.trading?.default_volume || 1;
+  $('autoOrderUsdt').value = settings.trading?.auto_order_usdt || settings.trading?.auto_margin_usdt || 10;
   $('autoLeverage').value = settings.trading?.default_leverage || 1;
+  $('autoLeverageEnabled').value = String(settings.trading?.auto_leverage_enabled ?? true);
+  $('maxAutoLeverage').value = settings.trading?.max_auto_leverage || 20;
+  $('disableSignalFilters').value = String(settings.trading?.disable_signal_filters || false);
   applyMinVolumeFlag();
   await checkStatus();
   await signalStatus();
@@ -180,8 +168,15 @@ async function init() {
 }
 function applyMinVolumeFlag() {
   const useMin = $('useMinVolume').value === 'true';
+  $('autoOrderUsdt').disabled = useMin;
   $('autoLeverage').disabled = useMin;
-  if (useMin) $('autoLeverage').value = 1;
+  $('autoLeverageEnabled').disabled = useMin;
+  $('maxAutoLeverage').disabled = useMin;
+  if (useMin) {
+    $('autoLeverage').value = 1;
+    $('autoLeverageEnabled').value = 'false';
+    $('maxAutoLeverage').value = 1;
+  }
 }
 async function saveSettings() {
   applyMinVolumeFlag();
@@ -189,11 +184,15 @@ async function saveSettings() {
     selected_exchange: selected,
     exchanges: { mexc: { enabled: $('mexcEnabled').value === 'true' } },
     trading: {
-      default_volume: Number($('autoVolume').value || $('volume').value),
+      default_volume: Number($('volume').value || 1),
       default_leverage: $('useMinVolume').value === 'true' ? 1 : Number($('autoLeverage').value || $('leverage').value),
       default_direction: $('direction').value,
       auto_trading_enabled: $('autoTradingEnabled').value === 'true',
-      use_min_volume: $('useMinVolume').value === 'true'
+      use_min_volume: $('useMinVolume').value === 'true',
+      auto_order_usdt: Number($('autoOrderUsdt').value || 10),
+      auto_leverage_enabled: $('useMinVolume').value === 'true' ? false : $('autoLeverageEnabled').value === 'true',
+      max_auto_leverage: $('useMinVolume').value === 'true' ? 1 : Number($('maxAutoLeverage').value || 20),
+      disable_signal_filters: $('disableSignalFilters').value === 'true'
     },
     signals: { enabled: $('signalsEnabled').value === 'true', server_ws_url: $('serverWs').value, server_http_url: $('serverHttp').value }
   };
@@ -260,7 +259,7 @@ async function loadTradingLogs() {
 }
 async function loadOpenTrades() {
   const data = await api('/api/trading/open-trades');
-  $('openTrades').innerHTML = data.items.map(x => `<tr><td>${x.trade_key || ''}</td><td>${x.symbol || ''}</td><td>${x.direction || ''}</td><td>${x.volume || ''}</td><td>${x.leverage || ''}</td><td>${x.opened_at || ''}</td><td>${x.open_order_id || ''}</td></tr>`).join('');
+  $('openTrades').innerHTML = data.items.map(x => `<tr><td>${x.trade_key || ''}</td><td>${x.symbol || ''}</td><td>${x.direction || ''}</td><td>${fmtMoney(x.estimated_margin_usdt)}</td><td>${fmtMoney(x.notional_usdt)}</td><td>${x.volume || ''}</td><td>${x.leverage || ''}x${x.auto_leverage_used ? ' ⚡' : ''}</td><td>${x.opened_at || ''}</td><td>${x.open_order_id || ''}</td></tr>`).join('');
 }
 init();
 </script>

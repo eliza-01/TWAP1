@@ -9,6 +9,6 @@ router = APIRouter(prefix="/api/signals", tags=["signals"])
 
 
 @router.get("/pending")
-async def pending_signals(request: Request, after_id: int = 0, limit: int = 100) -> dict:
+async def pending_signals(request: Request, after_id: int = 0, limit: int = 100, include_rejected: bool = False) -> dict:
     check_http_request(request)
-    return {"items": signal_repository.list_pending(after_id=after_id, limit=min(max(limit, 1), 500))}
+    return {"items": signal_repository.list_pending(after_id=after_id, limit=min(max(limit, 1), 500), include_rejected=include_rejected)}
