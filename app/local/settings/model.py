@@ -22,7 +22,7 @@ class LocalSignalSettings:
 
 @dataclass
 class LocalTradingSettings:
-    default_volume: float = 1.0
+    default_volume: float = 10.0
     default_leverage: int = 1
     default_direction: str = "long"
     auto_trading_enabled: bool = False

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP, ROUND_UP
 from typing import Any
 
 from app.exchanges.core.base import ExchangeAdapter
@@ -12,6 +12,7 @@ from app.exchanges.core.types import (
     ConnectionStatus,
     ExchangeConfig,
     FuturesAsset,
+    NotionalRounding,
     OpenOrderRequest,
     OrderResult,
     Position,
@@ -132,8 +133,9 @@ class MexcAdapter(ExchangeAdapter):
         contract = await self._contract_detail(symbol)
         ticker = await self.client.get(TICKER, {"symbol": symbol})
 
-        price = _normalize_price(_ticker_price(ticker, _trade_price_side(request.direction, is_close=False)), contract)
-        volume = _normalize_volume(request.volume, contract, symbol)
+        raw_price = _ticker_price(ticker, _trade_price_side(request.direction, is_close=False))
+        price = _normalize_price(raw_price, contract)
+        volume = _order_volume(request.volume, request.amount_usdt, request.notional_rounding, contract, symbol, raw_price)
         leverage = _normalize_leverage(request.leverage, contract, symbol)
 
         payload = {
@@ -148,7 +150,7 @@ class MexcAdapter(ExchangeAdapter):
         }
         data = await self.client.post(SUBMIT_ORDER, payload)
         order_id = str(data.get("data") or "") or None
-        return OrderResult(True, "Ордер открытия отправлен", order_id, {"request": payload, "response": data})
+        return OrderResult(True, "Ордер открытия отправлен", order_id, {"request": payload, "meta": _order_meta(request.amount_usdt, request.notional_rounding, volume, contract, raw_price), "response": data})
 
     async def close_position(self, request: CloseOrderRequest) -> OrderResult:
         self._ensure_ready()
@@ -156,9 +158,10 @@ class MexcAdapter(ExchangeAdapter):
         positions = await self.positions(symbol)
         target = _find_close_target(positions, request)
         contract = await self._contract_detail(symbol)
-        volume = _normalize_volume(request.volume or target.volume, contract, symbol)
         ticker = await self.client.get(TICKER, {"symbol": symbol})
-        price = _normalize_price(_ticker_price(ticker, _trade_price_side(request.direction, is_close=True)), contract)
+        raw_price = _ticker_price(ticker, _trade_price_side(request.direction, is_close=True))
+        price = _normalize_price(raw_price, contract)
+        volume = _close_order_volume(request, target, contract, symbol, raw_price)
 
         payload: dict[str, Any] = {
             "symbol": symbol,
@@ -172,7 +175,7 @@ class MexcAdapter(ExchangeAdapter):
             payload["positionId"] = request.position_id or target.position_id
         data = await self.client.post(SUBMIT_ORDER, payload)
         order_id = str(data.get("data") or "") or None
-        return OrderResult(True, "Ордер закрытия отправлен", order_id, {"request": payload, "response": data})
+        return OrderResult(True, "Ордер закрытия отправлен", order_id, {"request": payload, "meta": _order_meta(request.amount_usdt, request.notional_rounding, volume, contract, raw_price), "response": data})
 
     async def _contract_detail(self, symbol: str) -> dict[str, Any]:
         data = await self.client.get(CONTRACT_DETAIL, {"symbol": symbol})
@@ -259,7 +262,13 @@ def _normalize_price(price: float, contract: dict[str, Any]) -> float | int:
     return _json_number(value, scale)
 
 
-def _normalize_volume(volume: float, contract: dict[str, Any], symbol: str) -> float | int:
+def _normalize_volume(
+    volume: float | Decimal,
+    contract: dict[str, Any],
+    symbol: str,
+    rounding: NotionalRounding = "down",
+    clamp_to_min: bool = False,
+) -> float | int:
     raw = _decimal(volume)
     if raw <= 0:
         raise ExchangeRequestError("Объем должен быть больше 0")
@@ -270,14 +279,82 @@ def _normalize_volume(volume: float, contract: dict[str, Any], symbol: str) -> f
     step = _step(contract.get("volUnit"), scale)
 
     if min_vol > 0 and raw < min_vol:
-        raise ExchangeRequestError(f"Минимальный объем для {symbol}: {_plain(min_vol)}")
+        if not clamp_to_min:
+            raise ExchangeRequestError(f"Минимальный объем для {symbol}: {_plain(min_vol)}")
+        raw = min_vol
     if max_vol > 0 and raw > max_vol:
         raise ExchangeRequestError(f"Максимальный объем для {symbol}: {_plain(max_vol)}")
 
-    value = _round_to_step(raw, step, ROUND_DOWN)
+    value = _round_to_step(raw, step, ROUND_UP if rounding == "up" else ROUND_DOWN)
     if value <= 0 or (min_vol > 0 and value < min_vol):
         raise ExchangeRequestError(f"Объем должен быть кратен {_plain(step)} и не меньше {_plain(min_vol)}")
+    if max_vol > 0 and value > max_vol:
+        raise ExchangeRequestError(f"Максимальный объем для {symbol}: {_plain(max_vol)}")
     return _json_number(value, scale)
+
+
+def _order_volume(
+    volume: float | None,
+    amount_usdt: float | None,
+    notional_rounding: NotionalRounding,
+    contract: dict[str, Any],
+    symbol: str,
+    price: float,
+) -> float | int:
+    if amount_usdt is not None and amount_usdt > 0:
+        return _volume_from_notional(amount_usdt, contract, symbol, price, notional_rounding)
+    return _normalize_volume(volume or 0, contract, symbol)
+
+
+def _close_order_volume(
+    request: CloseOrderRequest,
+    target: Position,
+    contract: dict[str, Any],
+    symbol: str,
+    price: float,
+) -> float | int:
+    if request.amount_usdt is not None and request.amount_usdt > 0:
+        requested = _decimal(_volume_from_notional(request.amount_usdt, contract, symbol, price, request.notional_rounding))
+        held = _decimal(target.volume)
+        if held > 0 and requested > held:
+            requested = held
+        return _normalize_volume(requested, contract, symbol)
+    return _normalize_volume(request.volume or target.volume, contract, symbol)
+
+
+def _volume_from_notional(
+    amount_usdt: float,
+    contract: dict[str, Any],
+    symbol: str,
+    price: float,
+    rounding: NotionalRounding = "down",
+) -> float | int:
+    notional = _decimal(amount_usdt)
+    if notional <= 0:
+        raise ExchangeRequestError("Объем сделки должен быть больше 0 USDT")
+
+    price_value = _decimal(price)
+    if price_value <= 0:
+        raise ExchangeRequestError(f"Нет текущей цены для {symbol}")
+
+    raw_volume = notional / (price_value * _contract_size(contract))
+    return _normalize_volume(raw_volume, contract, symbol, rounding, clamp_to_min=True)
+
+
+def _order_meta(
+    amount_usdt: float | None,
+    notional_rounding: NotionalRounding,
+    volume: float | int,
+    contract: dict[str, Any],
+    price: float,
+) -> dict[str, Any]:
+    rounded_amount = _decimal(volume) * _decimal(price) * _contract_size(contract)
+    return {
+        "requested_amount_usdt": amount_usdt,
+        "notional_rounding": notional_rounding,
+        "rounded_amount_usdt": _json_number(rounded_amount, 8),
+        "contract_size": _json_number(_contract_size(contract), 12),
+    }
 
 
 def _normalize_leverage(leverage: int, contract: dict[str, Any], symbol: str) -> int:
@@ -287,6 +364,11 @@ def _normalize_leverage(leverage: int, contract: dict[str, Any], symbol: str) ->
     if value < min_leverage or value > max_leverage:
         raise ExchangeRequestError(f"Плечо для {symbol}: от {min_leverage}x до {max_leverage}x")
     return value
+
+
+def _contract_size(contract: dict[str, Any]) -> Decimal:
+    value = _decimal(contract.get("contractSize") or 1)
+    return value if value > 0 else Decimal("1")
 
 
 def _scale(value: Any, fallback: int) -> int:

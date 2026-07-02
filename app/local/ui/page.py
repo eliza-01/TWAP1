@@ -17,12 +17,22 @@ def render_page() -> str:
     summary { cursor: pointer; font-weight: 700; }
     label { display: block; font-size: 13px; color: #8b949e; margin: 10px 0 4px; }
     input, select, button { border-radius: 8px; border: 1px solid #30363d; padding: 9px 10px; background: #0d1117; color: #e6edf3; }
+    input[list]::-webkit-calendar-picker-indicator { display: none !important; }
     button { cursor: pointer; background: #238636; border-color: #238636; font-weight: 700; }
     button.secondary { background: #21262d; border-color: #30363d; }
     button.danger { background: #da3633; border-color: #da3633; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
     .status { padding: 10px; border-radius: 10px; background: #0d1117; border: 1px solid #30363d; white-space: pre-wrap; max-height: 360px; overflow: auto; }
+    .trade-preview { margin-top:10px; display:grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap:8px; }
+    .trade-preview div { background:#0d1117; border:1px solid #30363d; border-radius:10px; padding:10px; }
+    .trade-preview b { display:block; margin-top:4px; font-size:15px; }
+    .assets-panel { max-width: 680px; }
+    .assets-tools { max-width: 540px; margin-top: 10px; }
+    .assets-tools input { width: 100%; box-sizing: border-box; }
+    .assets-scroll { max-width: 680px; max-height: 320px; overflow: auto; border: 1px solid #30363d; border-radius: 10px; margin-top: 10px; }
+    .assets-scroll table { margin-top: 0; }
+    .assets-scroll th { position: sticky; top: 0; background: #161b22; z-index: 1; }
     table { width: 100%; border-collapse: collapse; margin-top: 10px; }
     th, td { border-bottom: 1px solid #30363d; padding: 8px; text-align: left; font-size: 13px; vertical-align: top; }
     .ok { color: #3fb950; }
@@ -57,24 +67,40 @@ def render_page() -> str:
 
   <details>
     <summary>2. Futures активы</summary>
-    <button class="secondary" onclick="loadAssets()">Загрузить список</button>
-    <table><thead><tr><th>Символ</th><th>Min vol</th><th>Шаг</th><th>Плечо</th><th>Contract size</th></tr></thead><tbody id="assets"></tbody></table>
+    <div class="assets-panel">
+      <div class="row assets-tools">
+        <button class="secondary" onclick="loadAssets()">Загрузить список</button>
+        <div style="flex:1; min-width:220px">
+          <label>Поиск</label>
+          <input id="assetSearch" placeholder="BTC, HYPE, ETH..." oninput="renderAssets()" />
+        </div>
+      </div>
+      <div class="assets-scroll">
+        <table><thead><tr><th>Символ</th><th>Min vol</th><th>Шаг</th><th>Плечо</th><th>Contract size</th></tr></thead><tbody id="assets"></tbody></table>
+      </div>
+    </div>
   </details>
 
   <details open>
     <summary>3. Ручная сделка</summary>
     <div class="grid">
-      <div><label>Символ</label><input id="symbol" value="BTC_USDT" onblur="loadRules()" /></div>
+      <div>
+        <label>Символ</label>
+        <input id="symbol" value="BTC_USDT" list="symbolOptions" oninput="onSymbolInput()" onchange="loadRules()" onblur="loadRules()" />
+        <datalist id="symbolOptions"></datalist>
+      </div>
       <div><label>Направление</label><select id="direction"><option value="long">Long</option><option value="short">Short</option></select></div>
-      <div><label>Объем</label><input id="volume" type="number" step="0.0001" value="1" /></div>
+      <div><label>Объем, USDT</label><input id="amountUsdt" type="number" step="0.01" min="0.01" value="10" oninput="updateManualPreview()" /></div>
+      <div><label>Округление объема</label><select id="notionalRounding" onchange="updateManualPreview()"><option value="down">В меньшую сторону</option><option value="up">В большую сторону</option></select></div>
       <div><label>Плечо</label><input id="leverage" type="number" min="1" value="1" /></div>
     </div>
     <div class="row" style="margin-top:10px">
       <button onclick="openOrder()">Открыть market</button>
       <button class="danger" onclick="closeOrder()">Закрыть market</button>
       <button class="secondary" onclick="loadPositions()">Позиции</button>
-      <button class="secondary" onclick="loadRules()">Минимальный объем</button>
+      <button class="secondary" onclick="setMinManualAmount()">Минимальный объем</button>
     </div>
+    <div id="manualPreview" class="trade-preview"></div>
     <pre id="rules" class="status"></pre>
     <pre id="tradeResult" class="status"></pre>
     <table><thead><tr><th>Символ</th><th>Сторона</th><th>Объем</th><th>Entry</th><th>PnL</th><th>Position ID</th></tr></thead><tbody id="positions"></tbody></table>
@@ -131,10 +157,19 @@ def render_page() -> str:
 </main>
 <script>
 let selected = 'mexc';
+let assetsCache = [];
+let currentRules = null;
 const $ = id => document.getElementById(id);
 const show = (id, data) => $(id).textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
 const fmt = value => value === null || value === undefined ? '' : value;
 const fmtMoney = value => value === null || value === undefined || value === '' ? '' : `$${Number(value).toFixed(2)}`;
+const esc = value => String(value ?? '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[s]));
+const amountInput = value => {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return '';
+  const fixed = number < 1 ? number.toFixed(6) : number.toFixed(2);
+  return fixed.replace(/0+$/, '').replace(/\\.$/, '');
+};
 async function api(url, opts = {}) {
   const res = await fetch(url, {headers: {'content-type': 'application/json'}, ...opts});
   const data = await res.json();
@@ -144,17 +179,23 @@ async function api(url, opts = {}) {
 async function init() {
   const exchanges = await api('/api/exchanges');
   selected = exchanges.selected || 'mexc';
-  $('exchange').innerHTML = exchanges.items.map(e => `<option value="${e.name}">${e.title}</option>`).join('');
+  $('exchange').innerHTML = exchanges.items.map(e => `<option value="${esc(e.name)}">${esc(e.title)}</option>`).join('');
   $('exchange').value = selected;
-  $('exchange').onchange = async () => { selected = $('exchange').value; await api('/api/exchanges/select', {method:'POST', body: JSON.stringify({name:selected})}); };
+  $('exchange').onchange = async () => {
+    selected = $('exchange').value;
+    assetsCache = [];
+    await api('/api/exchanges/select', {method:'POST', body: JSON.stringify({name:selected})});
+    await loadAssets(false);
+  };
   const settings = await api('/api/settings');
   $('mexcEnabled').value = String(settings.exchanges?.mexc?.enabled || false);
   $('serverWs').value = settings.signals?.server_ws_url || '';
   $('serverHttp').value = settings.signals?.server_http_url || '';
   $('signalsEnabled').value = String(settings.signals?.enabled || false);
-  $('volume').value = settings.trading?.default_volume || 1;
+  $('amountUsdt').value = settings.trading?.default_volume || 10;
   $('leverage').value = settings.trading?.default_leverage || 1;
   $('direction').value = settings.trading?.default_direction || 'long';
+  $('notionalRounding').value = 'down';
   $('autoTradingEnabled').value = String(settings.trading?.auto_trading_enabled || false);
   $('useMinVolume').value = String(settings.trading?.use_min_volume || false);
   $('autoOrderUsdt').value = settings.trading?.auto_order_usdt || settings.trading?.auto_margin_usdt || 10;
@@ -166,6 +207,7 @@ async function init() {
   $('minUsdOverrideShare').value = settings.trading?.min_usd_override_twap_share_percent || 1;
   applyMinVolumeFlag();
   await checkStatus();
+  try { await loadAssets(false); await loadRules(); } catch(e) { show('rules', e.message); }
   await signalStatus();
   await loadSignals();
   await loadTradingLogs();
@@ -189,7 +231,7 @@ async function saveSettings() {
     selected_exchange: selected,
     exchanges: { mexc: { enabled: $('mexcEnabled').value === 'true' } },
     trading: {
-      default_volume: Number($('volume').value || 1),
+      default_volume: Number($('amountUsdt').value || 10),
       default_leverage: $('useMinVolume').value === 'true' ? 1 : Number($('autoLeverage').value || $('leverage').value),
       default_direction: $('direction').value,
       auto_trading_enabled: $('autoTradingEnabled').value === 'true',
@@ -212,43 +254,126 @@ async function saveSettings() {
 }
 async function checkStatus() { try { show('status', await api(`/api/exchanges/${selected}/status`)); } catch(e) { show('status', e.message); } }
 async function loadBalance() { try { show('status', await api(`/api/exchanges/${selected}/balance`)); } catch(e) { show('status', e.message); } }
-async function loadAssets() {
+async function loadAssets(renderStatus = true) {
   const data = await api(`/api/exchanges/${selected}/futures/assets`);
-  $('assets').innerHTML = data.items.map(x => `<tr><td><button class="secondary" onclick="pickSymbol('${x.symbol}')">${x.symbol}</button></td><td>${fmt(x.min_vol)}</td><td>${fmt(x.vol_unit)}</td><td>${fmt(x.min_leverage)}-${fmt(x.max_leverage)}</td><td>${fmt(x.contract_size)}</td></tr>`).join('');
+  assetsCache = data.items || [];
+  renderAssets();
+  renderSymbolOptions($('symbol').value);
+  if (renderStatus) show('rules', `Загружено активов: ${assetsCache.length}`);
+}
+function renderAssets() {
+  const query = ($('assetSearch')?.value || '').trim().toUpperCase();
+  const items = assetsCache.filter(x => !query || String(x.symbol || '').includes(query) || String(x.base_coin || '').toUpperCase().includes(query)).slice(0, 200);
+  $('assets').innerHTML = items.map(x => `<tr><td><button class="secondary" onclick="pickSymbol('${esc(x.symbol)}')">${esc(x.symbol)}</button></td><td>${fmt(x.min_vol)}</td><td>${fmt(x.vol_unit)}</td><td>${fmt(x.min_leverage)}-${fmt(x.max_leverage)}</td><td>${fmt(x.contract_size)}</td></tr>`).join('');
+}
+async function ensureAssetsLoaded() {
+  if (!assetsCache.length) await loadAssets(false);
+}
+async function onSymbolInput() {
+  await ensureAssetsLoaded();
+  renderSymbolOptions($('symbol').value);
+}
+function renderSymbolOptions(value = '') {
+  const query = String(value || '').trim().toUpperCase();
+  const items = assetsCache
+    .filter(x => !query || String(x.symbol || '').includes(query) || String(x.base_coin || '').toUpperCase().includes(query))
+    .slice(0, 30);
+  $('symbolOptions').innerHTML = items.map(x => `<option value="${esc(x.symbol)}">${esc(x.display_name || x.symbol)}</option>`).join('');
 }
 async function loadRules(symbol = null) {
-  const current = symbol || $('symbol').value;
+  const current = String(symbol || $('symbol').value || '').trim().toUpperCase();
+  if (!current) return null;
+  $('symbol').value = current;
   try {
     const data = await api(`/api/exchanges/${selected}/futures/rules?symbol=${encodeURIComponent(current)}`);
+    currentRules = data;
     show('rules', {
       symbol: data.symbol,
-      min_volume: data.min_volume,
-      volume_step: data.volume_step,
-      max_volume: data.max_volume,
+      min_order_usdt: data.min_notional_usdt,
+      min_volume_contracts: data.min_volume,
+      volume_step_contracts: data.volume_step,
+      max_volume_contracts: data.max_volume,
       leverage: `${data.min_leverage}x-${data.max_leverage}x`,
       price: data.price,
-      min_notional_usdt: data.min_notional_usdt
+      contract_size: data.contract_size
     });
+    updateManualPreview();
     return data;
   } catch(e) {
+    currentRules = null;
+    updateManualPreview();
     show('rules', e.message);
+    return null;
   }
+}
+async function setMinManualAmount() {
+  const rules = await loadRules();
+  if (rules?.min_notional_usdt) $('amountUsdt').value = amountInput(rules.min_notional_usdt);
+  updateManualPreview();
 }
 async function pickSymbol(symbol) {
   $('symbol').value = symbol;
-  const rules = await loadRules(symbol);
-  if (rules && $('useMinVolume').value === 'true') $('volume').value = rules.min_volume;
+  renderSymbolOptions(symbol);
+  await loadRules(symbol);
 }
-function orderPayload() { return { symbol: $('symbol').value, direction: $('direction').value, volume: Number($('volume').value), leverage: Number($('leverage').value), open_type: 1 }; }
+function manualVolumePreview() {
+  const amount = Number($('amountUsdt').value || 0);
+  if (!currentRules || !Number.isFinite(amount) || amount <= 0) return null;
+  const price = Number(currentRules.price || 0);
+  const contractSize = Number(currentRules.contract_size || 1) || 1;
+  const step = Number(currentRules.volume_step || 1) || 1;
+  const minVolume = Number(currentRules.min_volume || 0) || 0;
+  if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(step) || step <= 0) return null;
+
+  const oneContractUsdt = price * contractSize;
+  const rawVolume = amount / oneContractUsdt;
+  const units = rawVolume / step;
+  const roundUp = $('notionalRounding').value === 'up';
+  let contracts = (roundUp ? Math.ceil(units) : Math.floor(units)) * step;
+  if (minVolume > 0 && contracts < minVolume) contracts = minVolume;
+  const maxVolume = Number(currentRules.max_volume || 0) || 0;
+  const overMax = maxVolume > 0 && contracts > maxVolume;
+  const openedUsdt = contracts * oneContractUsdt;
+  return {amount, oneContractUsdt, rawVolume, contracts, openedUsdt, diff: openedUsdt - amount, roundUp, overMax, maxVolume};
+}
+function updateManualPreview() {
+  const box = $('manualPreview');
+  if (!box) return;
+  const preview = manualVolumePreview();
+  if (!preview) {
+    box.innerHTML = `<div><span class="muted">Предупреждение по объему</span><b>Выбери символ и загрузи правила</b></div>`;
+    return;
+  }
+  const diffClass = preview.diff > 0 ? 'warn' : (preview.diff < 0 ? 'bad' : 'ok');
+  const direction = preview.roundUp ? 'в большую сторону' : 'в меньшую сторону';
+  const cards = [
+    `<div><span class="muted">Размер 1 контракта</span><b>${fmtMoney(preview.oneContractUsdt)}</b></div>`,
+    `<div><span class="muted">Биржа получит объем</span><b>${fmt(preview.contracts)} контрактов</b></div>`,
+    `<div><span class="muted">Сделка будет открыта в объеме</span><b>${fmtMoney(preview.openedUsdt)}</b></div>`,
+    `<div><span class="muted">Отклонение от ввода</span><b class="${diffClass}">${preview.diff >= 0 ? '+' : '-'}${fmtMoney(Math.abs(preview.diff))}</b><span class="muted">Округление ${direction}</span></div>`
+  ];
+  if (preview.overMax) cards.push(`<div><span class="muted">Предупреждение</span><b class="bad">Больше максимума ${fmt(preview.maxVolume)} контрактов</b></div>`);
+  box.innerHTML = cards.join('');
+}
+function orderPayload() {
+  return {
+    symbol: $('symbol').value,
+    direction: $('direction').value,
+    amount_usdt: Number($('amountUsdt').value),
+    notional_rounding: $('notionalRounding').value,
+    leverage: Number($('leverage').value),
+    open_type: 1
+  };
+}
 async function openOrder() { try { show('tradeResult', await api(`/api/exchanges/${selected}/orders/open`, {method:'POST', body: JSON.stringify(orderPayload())})); await loadPositions(); } catch(e) { show('tradeResult', e.message); } }
 async function closeOrder() { try { show('tradeResult', await api(`/api/exchanges/${selected}/orders/close`, {method:'POST', body: JSON.stringify(orderPayload())})); await loadPositions(); } catch(e) { show('tradeResult', e.message); } }
 async function loadPositions() {
   const data = await api(`/api/exchanges/${selected}/positions`);
-  $('positions').innerHTML = data.items.map(x => `<tr><td>${x.symbol}</td><td>${x.direction}</td><td>${x.volume}</td><td>${fmt(x.entry_price)}</td><td>${fmt(x.pnl)}</td><td>${fmt(x.position_id)}</td></tr>`).join('');
+  $('positions').innerHTML = data.items.map(x => `<tr><td>${esc(x.symbol)}</td><td>${esc(x.direction)}</td><td>${x.volume}</td><td>${fmt(x.entry_price)}</td><td>${fmt(x.pnl)}</td><td>${fmt(x.position_id)}</td></tr>`).join('');
 }
 async function loadSignals() {
   const data = await api('/api/signals/recent');
-  $('signals').innerHTML = data.items.map(x => `<tr><td>${x.signal_id || x.id || ''}</td><td>${x.kind || 'twap_created'}</td><td>${x.asset || x.symbol || ''}</td><td>${x.side || ''}</td><td>${fmt(x.price)}</td><td>${fmt(x.amount_usd)}</td><td>${x.source || x.group_name || ''}</td></tr>`).join('');
+  $('signals').innerHTML = data.items.map(x => `<tr><td>${x.signal_id || x.id || ''}</td><td>${esc(x.kind || 'twap_created')}</td><td>${esc(x.asset || x.symbol || '')}</td><td>${esc(x.side || '')}</td><td>${fmt(x.price)}</td><td>${fmt(x.amount_usd)}</td><td>${esc(x.source || x.group_name || '')}</td></tr>`).join('');
 }
 async function syncSignals() {
   try {
@@ -262,11 +387,11 @@ async function syncSignals() {
 async function signalStatus() { try { show('signalStatus', await api('/api/signals/status')); } catch(e) { show('signalStatus', e.message); } }
 async function loadTradingLogs() {
   const data = await api('/api/trading/logs?limit=100');
-  $('tradeLogs').innerHTML = data.items.map(x => `<tr><td>${x.time || ''}</td><td><span class="pill ${x.level === 'success' ? 'ok' : (x.level === 'error' ? 'bad' : '')}">${x.level || ''}</span></td><td>${x.action || ''}</td><td>${x.symbol || ''}</td><td>${x.message || ''}</td></tr>`).join('');
+  $('tradeLogs').innerHTML = data.items.map(x => `<tr><td>${x.time || ''}</td><td><span class="pill ${x.level === 'success' ? 'ok' : (x.level === 'error' ? 'bad' : '')}">${esc(x.level || '')}</span></td><td>${esc(x.action || '')}</td><td>${esc(x.symbol || '')}</td><td>${esc(x.message || '')}</td></tr>`).join('');
 }
 async function loadOpenTrades() {
   const data = await api('/api/trading/open-trades');
-  $('openTrades').innerHTML = data.items.map(x => `<tr><td>${x.trade_key || ''}</td><td>${x.symbol || ''}</td><td>${x.direction || ''}</td><td>${fmtMoney(x.estimated_margin_usdt)}</td><td>${fmtMoney(x.notional_usdt)}</td><td>${x.volume || ''}</td><td>${x.leverage || ''}x${x.auto_leverage_used ? ' ⚡' : ''}</td><td>${x.opened_at || ''}</td><td>${x.open_order_id || ''}</td></tr>`).join('');
+  $('openTrades').innerHTML = data.items.map(x => `<tr><td>${esc(x.trade_key || '')}</td><td>${esc(x.symbol || '')}</td><td>${esc(x.direction || '')}</td><td>${fmtMoney(x.estimated_margin_usdt)}</td><td>${fmtMoney(x.notional_usdt)}</td><td>${x.volume || ''}</td><td>${x.leverage || ''}x${x.auto_leverage_used ? ' ⚡' : ''}</td><td>${x.opened_at || ''}</td><td>${x.open_order_id || ''}</td></tr>`).join('');
 }
 init();
 </script>
