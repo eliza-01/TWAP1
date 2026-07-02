@@ -1,13 +1,32 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from app.signal_server.api.deps import signal_hub
 from app.signal_server.api.routes import health, signals_pending, ws_signals
+from app.signal_server.auth import check_http_request
 
 
 def create_signal_server_app() -> FastAPI:
-    app = FastAPI(title="TWAP Signal Server")
+    app = FastAPI(
+        title="TWAP Signal Server",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
+
+    @app.middleware("http")
+    async def _global_rate_limit(request: Request, call_next):
+        try:
+            check_http_request(request, "global")
+        except HTTPException as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"success": False, "message": str(exc.detail)},
+                headers=exc.headers,
+            )
+        return await call_next(request)
 
     @app.on_event("startup")
     async def _startup() -> None:

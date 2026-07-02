@@ -19,6 +19,7 @@ def render_page() -> str:
     input, select, button { border-radius: 8px; border: 1px solid #30363d; padding: 9px 10px; background: #0d1117; color: #e6edf3; }
     input[list]::-webkit-calendar-picker-indicator { display: none !important; }
     button { cursor: pointer; background: #238636; border-color: #238636; font-weight: 700; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
     button.secondary { background: #21262d; border-color: #30363d; }
     button.danger { background: #da3633; border-color: #da3633; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
@@ -145,14 +146,14 @@ def render_page() -> str:
     <summary>5. Сервер сигналов</summary>
     <p class="muted">
       Сигналы слушаются всегда через WebSocket. Адреса берутся из <code>LOCAL_SIGNAL_WS_URL</code> и <code>LOCAL_SIGNAL_HTTP_URL</code> в <code>.env</code>, вручную в интерфейсе не вводятся.
-      Device token убран: локальный клиент и signal-server работают без него.
+      Защитный ключ тоже берётся только из <code>LOCAL_SIGNAL_ACCESS_KEY</code> / <code>SIGNAL_SERVER_ACCESS_KEY</code> и в UI не показывается.
     </p>
     <div id="signalBanner" class="signal-banner">
       <b>Состояние неизвестно</b>
       <span class="muted">Статус ещё не загружен</span>
     </div>
     <div class="row" style="margin-top:10px">
-      <button class="secondary" onclick="checkSignalConnection()">Проверить соединение</button>
+      <button id="signalCheckButton" class="secondary" onclick="checkSignalConnection()">Проверить соединение</button>
       <button class="secondary" onclick="loadSignals()">Последние локальные</button>
       <button class="secondary" onclick="signalStatus()">Обновить статус</button>
     </div>
@@ -395,6 +396,12 @@ async function signalStatus() {
   }
 }
 async function checkSignalConnection() {
+  const button = $('signalCheckButton');
+  if (button?.disabled) return;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Проверяем...';
+  }
   try {
     const data = await api('/api/signals/check', {method:'POST'});
     renderSignalState(data.health_ok ? {...data, state: data.state || 'connected'} : {...data, state:'error'});
@@ -402,6 +409,13 @@ async function checkSignalConnection() {
   } catch(e) {
     renderSignalState({state:'error', message:e.message});
     show('signalStatus', e.message);
+  } finally {
+    setTimeout(() => {
+      if (button) {
+        button.disabled = false;
+        button.textContent = 'Проверить соединение';
+      }
+    }, 5000);
   }
 }
 async function loadTradingLogs() {

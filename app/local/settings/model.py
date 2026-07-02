@@ -93,8 +93,8 @@ def settings_from_dict(data: dict[str, Any]) -> LocalSettings:
             ),
         ),
         signals=LocalSignalSettings(
-            server_ws_url=str(os.getenv("LOCAL_SIGNAL_WS_URL") or "ws://signal-server:8090/ws/signals"),
-            server_http_url=str(os.getenv("LOCAL_SIGNAL_HTTP_URL") or "http://signal-server:8090"),
+            server_ws_url=str(os.getenv("LOCAL_SIGNAL_WS_URL") or ""),
+            server_http_url=str(os.getenv("LOCAL_SIGNAL_HTTP_URL") or ""),
             last_signal_id=int(signals_raw.get("last_signal_id") or 0),
         ),
     )
