@@ -42,6 +42,11 @@ def render_page() -> str:
     .pill { display: inline-block; border: 1px solid #30363d; border-radius: 999px; padding: 2px 8px; font-size: 12px; }
     .pill.ok { border-color: #238636; background: rgba(35,134,54,.14); }
     .pill.bad { border-color: #da3633; background: rgba(218,54,51,.12); }
+    .signal-banner { margin: 10px 0; padding: 12px; border: 1px solid #30363d; border-radius: 10px; background: #0d1117; }
+    .signal-banner b { display:block; font-size:16px; margin-bottom:4px; }
+    .signal-banner.connected { border-color:#238636; background: rgba(35,134,54,.12); }
+    .signal-banner.connecting, .signal-banner.reconnecting { border-color:#d29922; background: rgba(210,153,34,.10); }
+    .signal-banner.error { border-color:#da3633; background: rgba(218,54,51,.10); }
     code { background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:1px 4px; }
   </style>
 </head>
@@ -136,20 +141,20 @@ def render_page() -> str:
     <table><thead><tr><th>Trade key</th><th>Символ</th><th>Сторона</th><th>Маржа</th><th>Объем USDT</th><th>Контракты</th><th>Плечо</th><th>Открыт</th><th>Order</th></tr></thead><tbody id="openTrades"></tbody></table>
   </details>
 
-  <details>
+  <details open>
     <summary>5. Сервер сигналов</summary>
-    <p class="muted">Если local и signal-server запущены в Docker Compose, используй <code>ws://signal-server:8090/ws/signals</code> и <code>http://signal-server:8090</code>. Для удалённого устройства нужен публичный <code>wss://...</code> и <code>https://...</code>.</p>
-    <div class="grid">
-      <div><label>WebSocket URL</label><input id="serverWs" placeholder="ws://signal-server:8090/ws/signals" /></div>
-      <div><label>HTTP URL</label><input id="serverHttp" placeholder="http://signal-server:8090" /></div>
-      <div><label>Device token</label><input id="deviceToken" type="password" /></div>
-      <div><label>Слушать сигналы</label><select id="signalsEnabled"><option value="true">Да</option><option value="false">Нет</option></select></div>
+    <p class="muted">
+      Сигналы слушаются всегда через WebSocket. Адреса берутся из <code>LOCAL_SIGNAL_WS_URL</code> и <code>LOCAL_SIGNAL_HTTP_URL</code> в <code>.env</code>, вручную в интерфейсе не вводятся.
+      Device token убран: локальный клиент и signal-server работают без него.
+    </p>
+    <div id="signalBanner" class="signal-banner">
+      <b>Состояние неизвестно</b>
+      <span class="muted">Статус ещё не загружен</span>
     </div>
     <div class="row" style="margin-top:10px">
-      <button onclick="saveSettings()">Сохранить</button>
-      <button class="secondary" onclick="syncSignals()">Синхронизировать с сервера</button>
+      <button class="secondary" onclick="checkSignalConnection()">Проверить соединение</button>
       <button class="secondary" onclick="loadSignals()">Последние локальные</button>
-      <button class="secondary" onclick="signalStatus()">Статус</button>
+      <button class="secondary" onclick="signalStatus()">Обновить статус</button>
     </div>
     <pre id="signalStatus" class="status"></pre>
     <table><thead><tr><th>ID</th><th>Тип</th><th>Актив</th><th>Сторона</th><th>Цена</th><th>Объем</th><th>Источник</th></tr></thead><tbody id="signals"></tbody></table>
@@ -189,9 +194,6 @@ async function init() {
   };
   const settings = await api('/api/settings');
   $('mexcEnabled').value = String(settings.exchanges?.mexc?.enabled || false);
-  $('serverWs').value = settings.signals?.server_ws_url || '';
-  $('serverHttp').value = settings.signals?.server_http_url || '';
-  $('signalsEnabled').value = String(settings.signals?.enabled || false);
   $('amountUsdt').value = settings.trading?.default_volume || 10;
   $('leverage').value = settings.trading?.default_leverage || 1;
   $('direction').value = settings.trading?.default_direction || 'long';
@@ -212,6 +214,8 @@ async function init() {
   await loadSignals();
   await loadTradingLogs();
   await loadOpenTrades();
+  setInterval(signalStatus, 5000);
+  setInterval(loadSignals, 5000);
 }
 function applyMinVolumeFlag() {
   const useMin = $('useMinVolume').value === 'true';
@@ -242,11 +246,9 @@ async function saveSettings() {
       disable_signal_filters: $('disableSignalFilters').value === 'true',
       ignore_min_usd_by_market_share: $('ignoreMinUsdByShare').value === 'true',
       min_usd_override_twap_share_percent: Number($('minUsdOverrideShare').value || 1)
-    },
-    signals: { enabled: $('signalsEnabled').value === 'true', server_ws_url: $('serverWs').value, server_http_url: $('serverHttp').value }
+    }
   };
   if ($('mexcToken').value) patch.exchanges.mexc.auth_token = $('mexcToken').value;
-  if ($('deviceToken').value) patch.signals.device_token = $('deviceToken').value;
   const saved = await api('/api/settings', {method:'PUT', body: JSON.stringify(patch)});
   show('status', saved);
   show('autoStatus', saved.trading);
@@ -375,16 +377,33 @@ async function loadSignals() {
   const data = await api('/api/signals/recent');
   $('signals').innerHTML = data.items.map(x => `<tr><td>${x.signal_id || x.id || ''}</td><td>${esc(x.kind || 'twap_created')}</td><td>${esc(x.asset || x.symbol || '')}</td><td>${esc(x.side || '')}</td><td>${fmt(x.price)}</td><td>${fmt(x.amount_usd)}</td><td>${esc(x.source || x.group_name || '')}</td></tr>`).join('');
 }
-async function syncSignals() {
-  try {
-    const data = await api('/api/signals/sync', {method:'POST'});
-    show('signalStatus', data);
-    await loadSignals();
-    await loadTradingLogs();
-    await loadOpenTrades();
-  } catch(e) { show('signalStatus', e.message); }
+function renderSignalState(data) {
+  const state = data?.state || 'error';
+  const title = state === 'connected' ? 'Подключено: сигналы слушаются' : state === 'connecting' ? 'Подключение к серверу сигналов' : state === 'reconnecting' ? 'Переподключение к серверу сигналов' : 'Нет соединения с сервером сигналов';
+  const details = data?.message || data?.health_message || '';
+  $('signalBanner').className = `signal-banner ${esc(state)}`;
+  $('signalBanner').innerHTML = `<b>${esc(title)}</b><span class="muted">${esc(details)}</span>`;
 }
-async function signalStatus() { try { show('signalStatus', await api('/api/signals/status')); } catch(e) { show('signalStatus', e.message); } }
+async function signalStatus() {
+  try {
+    const data = await api('/api/signals/status');
+    renderSignalState(data);
+    show('signalStatus', data);
+  } catch(e) {
+    renderSignalState({state:'error', message:e.message});
+    show('signalStatus', e.message);
+  }
+}
+async function checkSignalConnection() {
+  try {
+    const data = await api('/api/signals/check', {method:'POST'});
+    renderSignalState(data.health_ok ? {...data, state: data.state || 'connected'} : {...data, state:'error'});
+    show('signalStatus', data);
+  } catch(e) {
+    renderSignalState({state:'error', message:e.message});
+    show('signalStatus', e.message);
+  }
+}
 async function loadTradingLogs() {
   const data = await api('/api/trading/logs?limit=100');
   $('tradeLogs').innerHTML = data.items.map(x => `<tr><td>${x.time || ''}</td><td><span class="pill ${x.level === 'success' ? 'ok' : (x.level === 'error' ? 'bad' : '')}">${esc(x.level || '')}</span></td><td>${esc(x.action || '')}</td><td>${esc(x.symbol || '')}</td><td>${esc(x.message || '')}</td></tr>`).join('');
@@ -397,3 +416,4 @@ init();
 </script>
 </body>
 </html>"""
+
