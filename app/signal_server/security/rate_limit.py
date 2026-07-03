@@ -89,3 +89,4 @@ def env_float(name: str, default: float) -> float:
         return float((os.getenv(name) or "").strip() or default)
     except ValueError:
         return default
+

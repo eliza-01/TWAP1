@@ -14,3 +14,4 @@ def test_json_dump_serializes_common_telethon_values():
     assert '"bytes":"616263"' in dumped
     assert '"decimal":1.23' in dumped
     assert '"set":[1,2]' in dumped
+

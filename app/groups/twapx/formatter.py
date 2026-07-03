@@ -113,3 +113,4 @@ def _amount(value: object) -> str:
 
 def _value(value: object) -> str:
     return "n/a" if value is None else str(value)
+

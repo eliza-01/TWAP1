@@ -72,3 +72,4 @@ def _parse_thread_ids(value: str) -> set[int]:
         for item in value.replace("|", ";").replace(",", ";").split(";")
         if item.strip()
     }
+

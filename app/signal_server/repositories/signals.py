@@ -7,6 +7,15 @@ from app.db.connection import db_cursor
 
 
 class SignalRepository:
+    def max_signal_id(self) -> int:
+        with db_cursor(dictionary=True) as cursor:
+            cursor.execute("SELECT COALESCE(MAX(id), 0) AS max_id FROM twap_signals")
+            row = cursor.fetchone() or {}
+        try:
+            return int(row.get("max_id") or 0)
+        except (TypeError, ValueError):
+            return 0
+
     def list_pending(self, after_id: int = 0, limit: int = 100, include_rejected: bool = False) -> list[dict[str, Any]]:
         with db_cursor(dictionary=True) as cursor:
             cursor.execute(
@@ -125,3 +134,4 @@ def _symbol(asset: Any) -> str | None:
         return None
     text = str(asset).upper()
     return text if text.endswith("_USDT") else f"{text}_USDT"
+

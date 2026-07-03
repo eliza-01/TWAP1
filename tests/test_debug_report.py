@@ -76,3 +76,4 @@ def test_debug_report_shows_target_error():
 def test_debug_skipped_is_configurable():
     assert not should_send_debug("skipped", send_skipped=False)
     assert should_send_debug("skipped", send_skipped=True)
+

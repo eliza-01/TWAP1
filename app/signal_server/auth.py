@@ -101,3 +101,4 @@ def _bearer(value: str | None) -> str:
 
 def _safe_equal(left: str, right: str) -> bool:
     return secrets.compare_digest(left.encode(), right.encode())
+

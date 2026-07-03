@@ -1,44 +1,4 @@
-from __future__ import annotations
-
-
-def render_page() -> str:
-    return """<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TWAP Local Client</title>
-  <style>
-    :root { color-scheme: dark; font-family: Arial, sans-serif; }
-    body { margin: 0; background: #0d1117; color: #e6edf3; }
-    main { max-width: 1220px; margin: 0 auto; padding: 24px; }
-    h1 { margin: 0 0 16px; }
-    details { background: #161b22; border: 1px solid #30363d; border-radius: 12px; margin: 12px 0; padding: 12px 16px; }
-    summary { cursor: pointer; font-weight: 700; }
-    label { display: block; font-size: 13px; color: #8b949e; margin: 10px 0 4px; }
-    input, select, button { border-radius: 8px; border: 1px solid #30363d; padding: 9px 10px; background: #0d1117; color: #e6edf3; }
-    input[list]::-webkit-calendar-picker-indicator { display: none !important; }
-    button { cursor: pointer; background: #238636; border-color: #238636; font-weight: 700; }
-    button:disabled { opacity: .55; cursor: not-allowed; }
-    button.secondary { background: #21262d; border-color: #30363d; }
-    button.danger { background: #da3633; border-color: #da3633; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
-    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
-    .status { padding: 10px; border-radius: 10px; background: #0d1117; border: 1px solid #30363d; white-space: pre-wrap; max-height: 360px; overflow: auto; }
-    .trade-preview { margin-top:10px; display:grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap:8px; }
-    .trade-preview div { background:#0d1117; border:1px solid #30363d; border-radius:10px; padding:10px; }
-    .trade-preview b { display:block; margin-top:4px; font-size:15px; }
-    .assets-panel { max-width: 680px; }
-    .assets-tools { max-width: 540px; margin-top: 10px; }
-    .assets-tools input { width: 100%; box-sizing: border-box; }
-    .assets-scroll { max-width: 680px; max-height: 320px; overflow: auto; border: 1px solid #30363d; border-radius: 10px; margin-top: 10px; }
-    .assets-scroll table { margin-top: 0; }
-    .assets-scroll th { position: sticky; top: 0; background: #161b22; z-index: 1; }
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    th, td { border-bottom: 1px solid #30363d; padding: 8px; text-align: left; font-size: 13px; vertical-align: top; }
-    .ok { color: #3fb950; }
-    .bad { color: #f85149; }
-    .warn { color: #d29922; }
+from __future__ import annotationsdef render_page() -> str:    return """<!doctype html><html lang="ru"><head>  <meta charset="utf-8" />  <meta name="viewport" content="width=device-width, initial-scale=1" />  <title>TWAP Local Client</title>  <style>    :root { color-scheme: dark; font-family: Arial, sans-serif; }    body { margin: 0; background: #0d1117; color: #e6edf3; }    main { max-width: 1220px; margin: 0 auto; padding: 24px; }    h1 { margin: 0 0 16px; }    details { background: #161b22; border: 1px solid #30363d; border-radius: 12px; margin: 12px 0; padding: 12px 16px; }    summary { cursor: pointer; font-weight: 700; }    label { display: block; font-size: 13px; color: #8b949e; margin: 10px 0 4px; }    input, select, button { border-radius: 8px; border: 1px solid #30363d; padding: 9px 10px; background: #0d1117; color: #e6edf3; }    input[list]::-webkit-calendar-picker-indicator { display: none !important; }    button { cursor: pointer; background: #238636; border-color: #238636; font-weight: 700; }    button:disabled { opacity: .55; cursor: not-allowed; }    button.secondary { background: #21262d; border-color: #30363d; }    button.danger { background: #da3633; border-color: #da3633; }    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }    .status { padding: 10px; border-radius: 10px; background: #0d1117; border: 1px solid #30363d; white-space: pre-wrap; max-height: 360px; overflow: auto; }    .trade-preview { margin-top:10px; display:grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap:8px; }    .trade-preview div { background:#0d1117; border:1px solid #30363d; border-radius:10px; padding:10px; }    .trade-preview b { display:block; margin-top:4px; font-size:15px; }    .assets-panel { max-width: 680px; }    .assets-tools { max-width: 540px; margin-top: 10px; }    .assets-tools input { width: 100%; box-sizing: border-box; }    .assets-scroll { max-width: 680px; max-height: 320px; overflow: auto; border: 1px solid #30363d; border-radius: 10px; margin-top: 10px; }    .assets-scroll table { margin-top: 0; }    .assets-scroll th { position: sticky; top: 0; background: #161b22; z-index: 1; }    table { width: 100%; border-collapse: collapse; margin-top: 10px; }    th, td { border-bottom: 1px solid #30363d; padding: 8px; text-align: left; font-size: 13px; vertical-align: top; }    .ok { color: #3fb950; }    .bad { color: #f85149; }    .warn { color: #d29922; }
     .muted { color: #8b949e; }
     .pill { display: inline-block; border: 1px solid #30363d; border-radius: 999px; padding: 2px 8px; font-size: 12px; }
     .pill.ok { border-color: #238636; background: rgba(35,134,54,.14); }
@@ -60,8 +20,9 @@ def render_page() -> str:
     <summary>1. Биржа и подключение</summary>
     <div class="grid">
       <div><label>Биржа</label><select id="exchange"></select></div>
-      <div><label>MEXC WEB token</label><input id="mexcToken" placeholder="WEB..." type="password" /></div>
-      <div><label>Включить MEXC</label><select id="mexcEnabled"><option value="true">Да</option><option value="false">Нет</option></select></div>
+      <div><label>Binance API key</label><input id="binanceApiKey" placeholder="API key" type="password" /></div>
+      <div><label>Binance Secret key</label><input id="binanceSecretKey" placeholder="Secret key" type="password" /></div>
+      <div><label>Включить Binance</label><select id="binanceEnabled"><option value="true">Да</option><option value="false">Нет</option></select></div>
     </div>
     <div class="row" style="margin-top:10px">
       <button onclick="saveSettings()">Сохранить настройки</button>
@@ -92,7 +53,7 @@ def render_page() -> str:
     <div class="grid">
       <div>
         <label>Символ</label>
-        <input id="symbol" value="BTC_USDT" list="symbolOptions" oninput="onSymbolInput()" onchange="loadRules()" onblur="loadRules()" />
+        <input id="symbol" value="BTCUSDT" list="symbolOptions" oninput="onSymbolInput()" onchange="loadRules()" onblur="loadRules()" />
         <datalist id="symbolOptions"></datalist>
       </div>
       <div><label>Направление</label><select id="direction"><option value="long">Long</option><option value="short">Short</option></select></div>
@@ -118,7 +79,7 @@ def render_page() -> str:
       Автоторговля открывает сделки только по новым <code>twap_created</code> после момента включения.
       По умолчанию берутся только сигналы, прошедшие фильтр. Опция отключения фильтра разрешает вход и по rejected-сигналам.
       Отдельный флаг может игнорировать только <code>TWAPX_MIN_USD</code>, если <code>TWAPX_MIN_TWAP_SHARE_PERCENT</code> выше заданного порога.
-      Закрытие выполняется по связанному <code>twap_result</code>. Маржа isolated: <code>openType=1</code>.
+      Закрытие выполняется по связанному <code>twap_result</code>. Маржа isolated задаётся через Binance marginType=ISOLATED.
       Объем сделки задаётся в USDT как notional. Если свободной маржи не хватает, клиент подберёт минимальное плечо, но не выше лимита.
     </p>
     <div class="grid">
@@ -139,7 +100,7 @@ def render_page() -> str:
     </div>
     <pre id="autoStatus" class="status"></pre>
     <table><thead><tr><th>Время</th><th>Тип</th><th>Действие</th><th>Символ</th><th>Сообщение</th></tr></thead><tbody id="tradeLogs"></tbody></table>
-    <table><thead><tr><th>Trade key</th><th>Символ</th><th>Сторона</th><th>Маржа</th><th>Объем USDT</th><th>Контракты</th><th>Плечо</th><th>Открыт</th><th>Order</th></tr></thead><tbody id="openTrades"></tbody></table>
+    <table><thead><tr><th>Trade key</th><th>Символ</th><th>Сторона</th><th>Маржа</th><th>Объем USDT</th><th>Quantity</th><th>Плечо</th><th>Открыт</th><th>Order</th></tr></thead><tbody id="openTrades"></tbody></table>
   </details>
 
   <details open>
@@ -162,7 +123,7 @@ def render_page() -> str:
   </details>
 </main>
 <script>
-let selected = 'mexc';
+let selected = 'binance';
 let assetsCache = [];
 let currentRules = null;
 const $ = id => document.getElementById(id);
@@ -184,7 +145,7 @@ async function api(url, opts = {}) {
 }
 async function init() {
   const exchanges = await api('/api/exchanges');
-  selected = exchanges.selected || 'mexc';
+  selected = exchanges.selected || 'binance';
   $('exchange').innerHTML = exchanges.items.map(e => `<option value="${esc(e.name)}">${esc(e.title)}</option>`).join('');
   $('exchange').value = selected;
   $('exchange').onchange = async () => {
@@ -194,7 +155,7 @@ async function init() {
     await loadAssets(false);
   };
   const settings = await api('/api/settings');
-  $('mexcEnabled').value = String(settings.exchanges?.mexc?.enabled || false);
+  $('binanceEnabled').value = String(settings.exchanges?.binance?.enabled || false);
   $('amountUsdt').value = settings.trading?.default_volume || 10;
   $('leverage').value = settings.trading?.default_leverage || 1;
   $('direction').value = settings.trading?.default_direction || 'long';
@@ -234,7 +195,7 @@ async function saveSettings() {
   applyMinVolumeFlag();
   const patch = {
     selected_exchange: selected,
-    exchanges: { mexc: { enabled: $('mexcEnabled').value === 'true' } },
+    exchanges: { binance: { enabled: $('binanceEnabled').value === 'true' } },
     trading: {
       default_volume: Number($('amountUsdt').value || 10),
       default_leverage: $('useMinVolume').value === 'true' ? 1 : Number($('autoLeverage').value || $('leverage').value),
@@ -249,7 +210,8 @@ async function saveSettings() {
       min_usd_override_twap_share_percent: Number($('minUsdOverrideShare').value || 1)
     }
   };
-  if ($('mexcToken').value) patch.exchanges.mexc.auth_token = $('mexcToken').value;
+  if ($('binanceApiKey').value) patch.exchanges.binance.api_key = $('binanceApiKey').value;
+  if ($('binanceSecretKey').value) patch.exchanges.binance.secret_key = $('binanceSecretKey').value;
   const saved = await api('/api/settings', {method:'PUT', body: JSON.stringify(patch)});
   show('status', saved);
   show('autoStatus', saved.trading);
@@ -351,11 +313,11 @@ function updateManualPreview() {
   const direction = preview.roundUp ? 'в большую сторону' : 'в меньшую сторону';
   const cards = [
     `<div><span class="muted">Размер 1 контракта</span><b>${fmtMoney(preview.oneContractUsdt)}</b></div>`,
-    `<div><span class="muted">Биржа получит объем</span><b>${fmt(preview.contracts)} контрактов</b></div>`,
+    `<div><span class="muted">Биржа получит объем</span><b>${fmt(preview.contracts)} quantity</b></div>`,
     `<div><span class="muted">Сделка будет открыта в объеме</span><b>${fmtMoney(preview.openedUsdt)}</b></div>`,
     `<div><span class="muted">Отклонение от ввода</span><b class="${diffClass}">${preview.diff >= 0 ? '+' : '-'}${fmtMoney(Math.abs(preview.diff))}</b><span class="muted">Округление ${direction}</span></div>`
   ];
-  if (preview.overMax) cards.push(`<div><span class="muted">Предупреждение</span><b class="bad">Больше максимума ${fmt(preview.maxVolume)} контрактов</b></div>`);
+  if (preview.overMax) cards.push(`<div><span class="muted">Предупреждение</span><b class="bad">Больше максимума ${fmt(preview.maxVolume)} quantity</b></div>`);
   box.innerHTML = cards.join('');
 }
 function orderPayload() {

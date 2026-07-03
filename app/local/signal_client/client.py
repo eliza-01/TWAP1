@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-import asyncio
+from __future__ import annotationsimport asyncio
 import inspect
 import json
 import logging
@@ -210,3 +208,4 @@ def _connect_ws(url: str, headers: dict[str, str]):
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+

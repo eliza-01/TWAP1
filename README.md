@@ -150,7 +150,7 @@ DEBUG_SEND_SKIPPED=false
 
 - выбрать биржу;
 - включить или выключить биржу;
-- сохранить локальный MEXC WEB token;
+- сохранить локальный Binance API key и Secret key;
 - проверить подключение;
 - посмотреть баланс;
 - посмотреть список futures-активов;
@@ -318,7 +318,7 @@ GROUPS=twapx,new_group
 
 ```text
 app/exchanges/core/              общий контракт бирж
-app/exchanges/mexc/              изолированный MEXC Futures REST-адаптер
+app/exchanges/binance/              изолированный Binance USDⓈ-M Futures REST-адаптер
 app/local/                       локальный UI, настройки, клиент сигналов
 app/local/api/routes/            API локального UI
 app/signal_server/               центральный HTTP/WebSocket сервер сигналов

@@ -187,3 +187,4 @@ def _optional_num(regex: re.Pattern[str], text: str) -> float | None:
 def _optional_int(regex: re.Pattern[str], text: str) -> int | None:
     raw = _optional_group(regex, text)
     return int(raw) if raw else None
+

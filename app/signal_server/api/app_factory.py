@@ -39,3 +39,4 @@ def create_signal_server_app() -> FastAPI:
     for router in [health.router, signals_pending.router, ws_signals.router]:
         app.include_router(router)
     return app
+

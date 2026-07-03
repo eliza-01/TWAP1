@@ -38,3 +38,4 @@ def apply_filters(result: ParseResult, filters: FilterConfig) -> ParseResult:
 
 def _missing(payload: dict, key: str) -> bool:
     return key not in payload or payload[key] is None
+

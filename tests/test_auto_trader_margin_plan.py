@@ -91,3 +91,99 @@ def test_min_usd_share_override_keeps_other_rejections_blocked() -> None:
             "twap_share_percent": 5,
         },
     )
+
+
+
+def _binance_min_notional_rules() -> TradingRules:
+    return TradingRules(
+        symbol="LOWUSDT",
+        min_volume=0.01,
+        max_volume=1000,
+        volume_step=0.01,
+        contract_size=1,
+        min_leverage=1,
+        max_leverage=20,
+        price=10,
+        min_notional_usdt=5,
+    )
+
+
+def test_order_plan_uses_exchange_min_notional_when_it_is_higher_than_min_qty() -> None:
+    settings = LocalSettings(
+        trading=LocalTradingSettings(auto_order_usdt=1, default_leverage=1, max_auto_leverage=20)
+    )
+
+    plan = asyncio.run(_build_open_plan(settings, FakeAdapter(available=100), "LOWUSDT", _binance_min_notional_rules()))
+
+    assert plan.notional_usdt == 5
+    assert plan.target_order_usdt == 5
+    assert plan.volume == 0.5
+    assert plan.min_volume_used is True
+
+
+def test_min_volume_plan_uses_exchange_min_notional_when_it_is_higher_than_min_qty() -> None:
+    settings = LocalSettings(trading=LocalTradingSettings(use_min_volume=True))
+
+    plan = asyncio.run(_build_open_plan(settings, FakeAdapter(available=100), "LOWUSDT", _binance_min_notional_rules()))
+
+    assert plan.leverage == 1
+    assert plan.notional_usdt == 5
+    assert plan.target_order_usdt == 5
+    assert plan.volume == 0.5
+    assert plan.min_volume_used is True
+
+
+class FakeSettingsStore:
+    def __init__(self, settings: LocalSettings) -> None:
+        self.settings = settings
+
+    def load(self) -> LocalSettings:
+        return self.settings
+
+
+class FakeTradeStore:
+    def __init__(self) -> None:
+        self.logs = []
+        self.trades = []
+
+    def add_open_trade(self, trade: dict) -> dict:
+        self.trades.append(trade)
+        return trade
+
+    def add_log(self, *args, **kwargs) -> None:
+        self.logs.append((args, kwargs))
+
+
+class FakeOpenAdapter(FakeAdapter):
+    def __init__(self, available: float) -> None:
+        super().__init__(available)
+        self.request = None
+
+    async def trading_rules(self, symbol: str) -> TradingRules:
+        return _rules()
+
+    async def open_position(self, request):
+        from app.exchanges.core.types import OrderResult
+
+        self.request = request
+        return OrderResult(True, "ok", "123", {"request": request.__dict__})
+
+
+def test_auto_trader_opens_signal_with_amount_usdt_like_manual_order(monkeypatch) -> None:
+    from app.local.trading import auto_trader as module
+    from app.local.trading.auto_trader import LocalAutoTrader
+
+    settings = LocalSettings(
+        trading=LocalTradingSettings(auto_order_usdt=20, default_leverage=2, max_auto_leverage=20)
+    )
+    adapter = FakeOpenAdapter(available=100)
+    monkeypatch.setattr(module, "get_exchange", lambda *_args, **_kwargs: adapter)
+
+    trader = LocalAutoTrader(FakeSettingsStore(settings), FakeTradeStore())
+    asyncio.run(trader._open_from_signal({"signal_id": 1, "asset": "HYPE", "side": "buy", "kind": "twap_created"}))
+
+    assert adapter.request is not None
+    assert adapter.request.symbol == "HYPEUSDT"
+    assert adapter.request.direction == "long"
+    assert adapter.request.volume == 2
+    assert adapter.request.amount_usdt == 20

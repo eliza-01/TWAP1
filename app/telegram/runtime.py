@@ -46,6 +46,7 @@ class TelegramRuntime:
         for processor in processors:
             for chat_id in processor.config.source_chat_ids:
                 self._processors_by_chat_id.setdefault(chat_id, []).append(processor)
+        self._handlers_registered = False
 
     async def login(self) -> None:
         ensure_runtime_dirs(self.settings)
@@ -60,8 +61,11 @@ class TelegramRuntime:
         for processor in self.processors:
             self.group_repo.upsert(processor.config, processor.parser_key)
 
-        await self.client.start(phone=self.settings.telegram.phone or None)
+        # Register the Telethon handler before connecting. Otherwise updates that arrive
+        # during TelegramClient.start() can be consumed before our NewMessage handler exists.
         self._register_handlers()
+        await self.client.start(phone=self.settings.telegram.phone or None)
+        await self._log_source_chats_state()
         logger.info("Listening chats: %s", sorted(self._processors_by_chat_id.keys()))
         await self.client.run_until_disconnected()
 
@@ -82,14 +86,21 @@ class TelegramRuntime:
         await self.client.disconnect()
 
     def _register_handlers(self) -> None:
-        chats = list(self._processors_by_chat_id.keys())
+        if self._handlers_registered:
+            return
+        self._handlers_registered = True
+        chats = sorted(self._processors_by_chat_id.keys())
+        logger.info("Registering Telegram NewMessage handler for source chats: %s", chats)
 
-        @self.client.on(events.NewMessage(chats=chats))
+        # Do not pass chats=... here. With user sessions and channel/forum entities,
+        # Telethon can miss updates when an entity is not resolved exactly as the raw
+        # numeric -100... id. We accept all updates and immediately filter by chat_id
+        # ourselves, so the processing rules stay the same but the listener is safer.
+        @self.client.on(events.NewMessage)
         async def _handler(event: events.NewMessage.Event) -> None:
             chat_id = int(event.chat_id)
             processors = self._processors_by_chat_id.get(chat_id, [])
             if not processors:
-                logger.warning("No processor for chat_id=%s", event.chat_id)
                 return
 
             thread_id = _message_thread_id(event.message)
@@ -200,6 +211,22 @@ class TelegramRuntime:
             result.reason,
             forwarded_id,
         )
+
+    async def _log_source_chats_state(self) -> None:
+        for chat_id in sorted(self._processors_by_chat_id.keys()):
+            try:
+                entity = await self.client.get_entity(chat_id)
+                logger.info(
+                    "Source chat resolved: chat=%s title=%s username=%s",
+                    chat_id,
+                    getattr(entity, "title", None),
+                    getattr(entity, "username", None),
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to resolve source chat. Check TWAPX_SOURCE_CHAT_IDS and Telegram account access: chat=%s",
+                    chat_id,
+                )
 
     async def _send_debug_result(
         self,

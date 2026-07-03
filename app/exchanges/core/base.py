@@ -45,3 +45,4 @@ class ExchangeAdapter(ABC):
     @abstractmethod
     async def close_position(self, request: CloseOrderRequest) -> OrderResult:
         raise NotImplementedError
+

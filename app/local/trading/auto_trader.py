@@ -1,35 +1,4 @@
-from __future__ import annotations
-
-import logging
-import math
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any
-
-from app.exchanges.core.errors import ExchangeError
-from app.exchanges.core.types import CloseOrderRequest, OpenOrderRequest, TradingRules
-from app.exchanges.registry import get_exchange
-from app.local.settings.model import LocalSettings
-from app.local.settings.store import LocalSettingsStore
-from app.local.trading.log_store import LocalTradeStore
-
-logger = logging.getLogger(__name__)
-_MARGIN_SAFETY = 0.98
-
-
-@dataclass(frozen=True)
-class OpenPlan:
-    volume: float
-    leverage: int
-    target_order_usdt: float
-    estimated_margin_usdt: float
-    notional_usdt: float
-    price: float
-    contract_size: float
-    auto_leverage_used: bool
-    min_volume_used: bool
-    available_margin_usdt: float
-
+from __future__ import annotationsimport loggingimport mathfrom dataclasses import dataclassfrom datetime import datetime, timezonefrom typing import Anyfrom app.exchanges.core.errors import ExchangeErrorfrom app.exchanges.core.types import CloseOrderRequest, OpenOrderRequest, TradingRulesfrom app.exchanges.registry import get_exchangefrom app.local.settings.model import LocalSettingsfrom app.local.settings.store import LocalSettingsStorefrom app.local.trading.log_store import LocalTradeStorelogger = logging.getLogger(__name__)_MARGIN_SAFETY = 0.98@dataclass(frozen=True)class OpenPlan:    volume: float    leverage: int    target_order_usdt: float    estimated_margin_usdt: float    notional_usdt: float    price: float    contract_size: float    auto_leverage_used: bool    min_volume_used: bool    available_margin_usdt: float
 
 class LocalAutoTrader:
     def __init__(self, settings_store: LocalSettingsStore, trade_store: LocalTradeStore) -> None:
@@ -112,6 +81,8 @@ class LocalAutoTrader:
             direction=direction,
             volume=plan.volume,
             leverage=plan.leverage,
+            amount_usdt=plan.target_order_usdt,
+            notional_rounding="up" if plan.min_volume_used else "down",
             open_type=1,  # isolated margin
         )
 
@@ -205,7 +176,7 @@ async def _build_open_plan(settings: LocalSettings, adapter: Any, symbol: str, r
 
     min_volume = float(rules.min_volume or 0)
     if min_volume <= 0:
-        raise ExchangeError(f"MEXC не вернула минимальный объем для {symbol}")
+        raise ExchangeError(f"Binance не вернула минимальный объем для {symbol}")
 
     balance = await adapter.balance("USDT")
     available = float(balance.available or 0)
@@ -214,12 +185,12 @@ async def _build_open_plan(settings: LocalSettings, adapter: Any, symbol: str, r
         raise ExchangeError("Нет доступной USDT-маржи")
 
     if settings.trading.use_min_volume:
-        notional = _notional(min_volume, price, contract_size)
+        notional = _min_notional(rules, min_volume, price, contract_size)
         margin = notional
         if margin > spendable:
             raise ExchangeError(f"Недостаточно маржи для min volume: нужно ≈{_fmt(margin)} USDT, доступно ≈{_fmt(available)} USDT")
         return OpenPlan(
-            volume=min_volume,
+            volume=notional / (price * contract_size),
             leverage=1,
             target_order_usdt=notional,
             estimated_margin_usdt=margin,
@@ -236,9 +207,9 @@ async def _build_open_plan(settings: LocalSettings, adapter: Any, symbol: str, r
     target_notional = float(settings.trading.auto_order_usdt or 0)
     if target_notional <= 0:
         raise ExchangeError("Объем сделки должен быть больше 0 USDT")
-    min_notional = _notional(min_volume, price, contract_size)
+    min_notional = _min_notional(rules, min_volume, price, contract_size)
     min_volume_used = False
-    if target_notional < min_notional:
+    if target_notional <= min_notional:
         target_notional = min_notional
         min_volume_used = True
 
@@ -333,14 +304,16 @@ def _signal_symbol(signal: dict[str, Any]) -> str:
     symbol = signal.get("symbol") or _symbol(signal.get("asset"))
     if not symbol:
         raise ExchangeError("Сигнал без символа")
-    return str(symbol).upper()
+    clean = str(symbol).upper().replace("/", "").replace("_", "").replace("-", "")
+    return clean
 
 
 def _symbol(asset: Any) -> str | None:
     if not asset:
         return None
     text = str(asset).upper()
-    return text if text.endswith("_USDT") else f"{text}_USDT"
+    clean = text.replace("/", "").replace("_", "").replace("-", "")
+    return clean if clean.endswith("USDT") else f"{clean}USDT"
 
 
 def _direction_from_signal(signal: dict[str, Any]) -> str:
@@ -386,6 +359,13 @@ def _notional(volume: float, price: float, contract_size: float) -> float:
     return volume * price * contract_size
 
 
+def _min_notional(rules: TradingRules, min_volume: float, price: float, contract_size: float) -> float:
+    return max(
+        _notional(min_volume, price, contract_size),
+        float(rules.min_notional_usdt or 0),
+    )
+
+
 def _clamp_int(value: int, minimum: int, maximum: int) -> int:
     low = int(minimum or 1)
     high = int(maximum or low)
@@ -402,7 +382,7 @@ def _open_message(direction: str, symbol: str, plan: OpenPlan) -> str:
     tail = f" ({', '.join(suffix)})" if suffix else ""
     return (
         f"Открыта {direction} сделка {symbol}: volume≈{_fmt(plan.notional_usdt)} USDT, "
-        f"margin≈{_fmt(plan.estimated_margin_usdt)} USDT, contracts={plan.volume:g}, "
+        f"margin≈{_fmt(plan.estimated_margin_usdt)} USDT, quantity={plan.volume:g}, "
         f"leverage={plan.leverage}x, isolated{tail}"
     )
 
@@ -412,3 +392,4 @@ def _fmt(value: Any) -> str:
         return f"{float(value):.2f}"
     except (TypeError, ValueError):
         return "0.00"
+

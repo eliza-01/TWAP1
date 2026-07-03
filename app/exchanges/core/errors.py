@@ -15,3 +15,4 @@ class ExchangeDisabledError(ExchangeError):
 
 class ExchangeRequestError(ExchangeError):
     pass
+

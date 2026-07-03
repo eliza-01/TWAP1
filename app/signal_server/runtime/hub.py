@@ -67,9 +67,17 @@ class SignalHub:
                 return
             data = json.loads(raw)
             if isinstance(data, dict):
-                last_signal_id = int(data.get("last_signal_id") or 0)
-                pending_max_id = await self._send_pending(websocket, last_signal_id)
-                self.last_signal_id = max(self.last_signal_id, pending_max_id, last_signal_id)
+                client_last_signal_id = max(int(data.get("last_signal_id") or 0), 0)
+                db_max_signal_id = await asyncio.to_thread(self.repository.max_signal_id)
+                if client_last_signal_id > db_max_signal_id:
+                    logger.warning(
+                        "Signal WS client last_signal_id=%s is ahead of DB max=%s; treating it as fresh storage",
+                        client_last_signal_id,
+                        db_max_signal_id,
+                    )
+                    client_last_signal_id = 0
+                pending_max_id = await self._send_pending(websocket, client_last_signal_id)
+                self.last_signal_id = max(self.last_signal_id, pending_max_id, client_last_signal_id)
         except (asyncio.TimeoutError, json.JSONDecodeError, ValueError):
             pass
         except WebSocketDisconnect:
@@ -175,3 +183,4 @@ def _env_int(name: str, default: int) -> int:
         return int((os.getenv(name) or "").strip() or default)
     except ValueError:
         return default
+
