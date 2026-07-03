@@ -116,3 +116,4 @@ def migrate() -> None:
                 if exc.errno not in {1060, 1061}:  # duplicate column/key
                     raise
                 logger.debug("Migration skipped existing schema object: %s", query)
+
