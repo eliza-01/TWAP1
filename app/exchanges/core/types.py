@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 ExchangeStatus = Literal["connected", "error", "disabled", "not_configured"]
 OrderDirection = Literal["long", "short"]
+NotionalRounding = Literal["down", "up"]
 
 
 @dataclass(frozen=True)
@@ -81,6 +82,8 @@ class OpenOrderRequest:
     direction: OrderDirection
     volume: float
     leverage: int
+    amount_usdt: float | None = None
+    notional_rounding: NotionalRounding = "down"
     open_type: int = 1
 
 
@@ -89,6 +92,8 @@ class CloseOrderRequest:
     symbol: str
     direction: OrderDirection
     volume: float | None = None
+    amount_usdt: float | None = None
+    notional_rounding: NotionalRounding = "down"
     position_id: int | None = None
     open_type: int = 1
 

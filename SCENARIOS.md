@@ -25,7 +25,7 @@ docker compose --profile local up -d --force-recreate local
 docker compose --profile server build signal-server
 docker compose --profile server up -d --force-recreate signal-server
 
-### 1.4. Если менялось сразу несколько частей проекта
+### 1.4. Если менялось сразу несколько частей проекта !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 docker compose --profile local --profile server build
 docker compose --profile local --profile server up -d --force-recreate
@@ -80,15 +80,11 @@ docker compose --profile local --profile server up -d
 
 Используй этот сценарий на новом компьютере или после свежего клона проекта.
 
-### 3.1. Перейти в папку проекта
-
-cd C:\Projects\TWAP1
-
 ### 3.2. Создать `.env`
 
 Copy-Item .env.example .env
 
-Открой `.env` и заполни:
+### Открой `.env` и заполни
 
 ### 3.3. Собрать проект
 ### 3.4. Запустить MySQL и phpMyAdmin

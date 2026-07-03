@@ -156,6 +156,7 @@ DEBUG_SEND_SKIPPED=false
 - посмотреть список futures-активов;
 - посмотреть позиции;
 - вручную открыть или закрыть market-сделку.
+- всегда слушать Signal Server через WebSocket и показывать состояние соединения.
 
 Локальные настройки сохраняются здесь:
 
@@ -176,12 +177,29 @@ Signal Server читает принятые `twap_created` сигналы из M
 ```text
 HTTP:      http://localhost:8090
 WebSocket: ws://localhost:8090/ws/signals
-Fallback:  http://localhost:8090/api/signals/pending?after_id=0
+Health:    http://localhost:8090/health
 ```
 
-Локальный клиент сам держит исходящее WebSocket-соединение с сервером. Это важно: серверу не нужно пробивать NAT/firewall пользователя входящими запросами.
+Локальный клиент сам держит исходящее WebSocket-соединение с сервером и слушает сигналы всегда. Это важно: серверу не нужно пробивать NAT/firewall пользователя входящими запросами.
 
-Если WebSocket-соединение оборвалось, клиент хранит `last_signal_id` и может забрать пропущенные сигналы через HTTP fallback.
+Адреса Signal Server задаются через `.env`: `LOCAL_SIGNAL_WS_URL` и `LOCAL_SIGNAL_HTTP_URL`. В UI ручной ввод адресов и синхронизация убраны.
+
+Защита Signal Server задаётся только через `.env` и не показывается в UI:
+
+```env
+SIGNAL_SERVER_ACCESS_KEY=сложный_ключ
+LOCAL_SIGNAL_ACCESS_KEY=тот_же_сложный_ключ
+SIGNAL_SERVER_DB_CHECK_SECONDS=0.5
+SIGNAL_SERVER_MAX_WS_CLIENTS=120
+SIGNAL_SERVER_HTTP_MAX_PER_MINUTE=300
+SIGNAL_SERVER_HEALTH_MIN_INTERVAL_SECONDS=2
+SIGNAL_SERVER_PENDING_MIN_INTERVAL_SECONDS=5
+SIGNAL_SERVER_WS_MIN_CONNECT_INTERVAL_SECONDS=1
+```
+
+Если `SIGNAL_SERVER_ACCESS_KEY` пустой, HTTP/WebSocket остаются без авторизации. Для публичного сервера ключ обязателен.
+
+Если WebSocket-соединение оборвалось, клиент хранит `last_signal_id` и при переподключении получает пропущенные сигналы через WebSocket hello. Повторные подключения идут с backoff, чтобы клиенты не долбили сервер при аварии.
 
 ## Таблицы в базе данных
 
@@ -321,3 +339,4 @@ app/exchanges/<exchange>/
 ```text
 app/exchanges/registry.py
 ```
+

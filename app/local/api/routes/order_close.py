@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Body
 from fastapi.responses import JSONResponse
 
@@ -14,12 +16,18 @@ router = APIRouter(prefix="/api/exchanges", tags=["orders"])
 async def close_order(exchange: str, payload: dict = Body(...)):
     try:
         adapter = selected_exchange(exchange)
-        volume = payload.get("volume")
+        amount_usdt = _first_float(payload, "amount_usdt", "volume_usdt")
+        volume_contracts = _first_float(payload, "volume_contracts")
+        if amount_usdt is None and volume_contracts is None:
+            amount_usdt = _first_float(payload, "volume")
+
         position_id = payload.get("position_id")
         request = CloseOrderRequest(
             symbol=str(payload.get("symbol") or "").upper(),
             direction="short" if payload.get("direction") == "short" else "long",
-            volume=float(volume) if volume not in {None, ""} else None,
+            volume=volume_contracts,
+            amount_usdt=amount_usdt,
+            notional_rounding=_rounding(payload),
             position_id=int(position_id) if position_id not in {None, ""} else None,
             open_type=int(payload.get("open_type") or 1),
         )
@@ -27,3 +35,15 @@ async def close_order(exchange: str, payload: dict = Body(...)):
         return {"success": result.success, "message": result.message, "order_id": result.order_id, "raw": result.raw}
     except (ExchangeError, ValueError) as exc:
         return JSONResponse(status_code=400, content={"success": False, "message": str(exc)})
+
+
+def _first_float(payload: dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        value = payload.get(key)
+        if value not in {None, ""}:
+            return float(value)
+    return None
+
+
+def _rounding(payload: dict[str, Any]) -> str:
+    return "up" if payload.get("notional_rounding") == "up" else "down"

@@ -13,16 +13,14 @@ class LocalExchangeSettings:
 
 @dataclass
 class LocalSignalSettings:
-    enabled: bool = False
     server_ws_url: str = ""
     server_http_url: str = ""
-    device_token: str = ""
     last_signal_id: int = 0
 
 
 @dataclass
 class LocalTradingSettings:
-    default_volume: float = 1.0
+    default_volume: float = 10.0
     default_leverage: int = 1
     default_direction: str = "long"
     auto_trading_enabled: bool = False
@@ -51,8 +49,6 @@ class LocalSettings:
             for exchange in data.get("exchanges", {}).values():
                 token = exchange.get("auth_token") or ""
                 exchange["auth_token"] = _mask(token)
-            token = data.get("signals", {}).get("device_token") or ""
-            data["signals"]["device_token"] = _mask(token)
         return data
 
 
@@ -97,10 +93,8 @@ def settings_from_dict(data: dict[str, Any]) -> LocalSettings:
             ),
         ),
         signals=LocalSignalSettings(
-            enabled=_bool_value(signals_raw.get("enabled"), _env_bool("LOCAL_SIGNAL_CLIENT_ENABLED", False)),
-            server_ws_url=str(signals_raw.get("server_ws_url") or os.getenv("LOCAL_SIGNAL_WS_URL") or ""),
-            server_http_url=str(signals_raw.get("server_http_url") or os.getenv("LOCAL_SIGNAL_HTTP_URL") or ""),
-            device_token=str(signals_raw.get("device_token") or os.getenv("LOCAL_SIGNAL_DEVICE_TOKEN") or ""),
+            server_ws_url=str(os.getenv("LOCAL_SIGNAL_WS_URL") or ""),
+            server_http_url=str(os.getenv("LOCAL_SIGNAL_HTTP_URL") or ""),
             last_signal_id=int(signals_raw.get("last_signal_id") or 0),
         ),
     )
@@ -112,13 +106,6 @@ def _mask(value: str) -> str:
     if len(value) <= 10:
         return "***"
     return f"{value[:4]}...{value[-4:]}"
-
-
-def _env_bool(name: str, default: bool) -> bool:
-    raw = (os.getenv(name) or "").strip().lower()
-    if not raw:
-        return default
-    return raw in {"1", "true", "yes", "y", "on"}
 
 
 def _bool_value(value: Any, default: bool) -> bool:
