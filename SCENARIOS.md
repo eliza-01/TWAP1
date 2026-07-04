@@ -7,6 +7,13 @@
 cd C:\Projects\TWAP1
 
 
+
+### 5.3. Остановить всё приложение без удаления данных
+
+docker compose --profile local --profile server down
+
+Данные не удаляются.
+
 ## 1. Перезапуск после правок кода
 
 Используй этот сценарий, если менялись файлы проекта: `app/`, `tests/`, `Dockerfile`, `requirements.txt`, frontend/local UI, Signal Server и т.д.
@@ -236,13 +243,6 @@ docker compose --profile local --profile server up -d
 * `phpmyadmin`;
 * `local`;
 * `signal-server`.
-
-### 5.3. Остановить всё приложение без удаления данных
-
-docker compose --profile local --profile server down
-
-
-Данные не удаляются.
 
 ### 5.4. Остановить всё приложение с удалением базы данных
 

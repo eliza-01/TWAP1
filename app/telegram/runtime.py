@@ -160,9 +160,6 @@ class TelegramRuntime:
         result = processor.process(text)
         parsed_id = await asyncio.to_thread(self.message_repo.save_parsed, incoming_id, processor.parser_key, result)
 
-        if result.kind in {"twap_created", "twap_result"} and result.status in {"accepted", "rejected"}:
-            await asyncio.to_thread(self.message_repo.save_twap_signal, parsed_id, processor.config.name, result)
-
         related_message_found: bool | None = None
         if result.kind == "twap_result" and result.status == "accepted":
             original = await asyncio.to_thread(
@@ -175,6 +172,9 @@ class TelegramRuntime:
             related_message_found = bool(original)
             if original:
                 await asyncio.to_thread(self.message_repo.link_result_to_created, parsed_id, original)
+
+        if result.kind in {"twap_created", "twap_result"} and result.status in {"accepted", "rejected"}:
+            await asyncio.to_thread(self.message_repo.save_twap_signal, parsed_id, processor.config.name, result)
 
         forwarded_id, target_error = await self._forward_processed_message(
             processor,
