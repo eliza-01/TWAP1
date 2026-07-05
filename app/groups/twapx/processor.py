@@ -29,4 +29,3 @@ class TwapxProcessor:
 
     def format_result(self, result: ParseResult, original: dict[str, Any]) -> str:
         return format_result(result, original)
-

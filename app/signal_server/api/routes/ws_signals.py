@@ -12,4 +12,3 @@ router = APIRouter(tags=["signals"])
 async def ws_signals(websocket: WebSocket) -> None:
     if await check_websocket(websocket):
         await signal_hub.connect(websocket)
-

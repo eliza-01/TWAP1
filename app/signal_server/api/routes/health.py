@@ -11,4 +11,3 @@ router = APIRouter(tags=["health"])
 async def health(request: Request) -> dict:
     check_http_request(request, "health")
     return {"status": "ok"}
-

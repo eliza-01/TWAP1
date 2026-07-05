@@ -34,4 +34,3 @@ def load_processors(group_names: list[str]) -> list[GroupProcessor]:
             continue
         raise ValueError(f"Unknown group parser: {group_name}")
     return processors
-

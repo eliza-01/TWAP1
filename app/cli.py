@@ -38,11 +38,14 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    settings = load_settings()
+
     if args.command == "local":
+        init_pool(settings.db)
+        migrate()
         uvicorn.run("app.local.api.app_factory:create_local_app", host=args.host, port=args.port, factory=True)
         return
 
-    settings = load_settings()
     init_pool(settings.db)
     migrate()
 
@@ -68,4 +71,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

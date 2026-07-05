@@ -61,4 +61,3 @@ class ParseResult:
     @staticmethod
     def error(reason: str, payload: dict[str, Any] | None = None) -> "ParseResult":
         return ParseResult("unknown", "error", reason, payload or {})
-

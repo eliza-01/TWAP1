@@ -83,6 +83,20 @@ class LocalTradeStore:
         self._write(data)
         return trade
 
+    def update_open_trade(self, trade_key: str, patch: dict[str, Any]) -> dict[str, Any] | None:
+        data = self._read()
+        trades = data.setdefault("trades", [])
+        updated: dict[str, Any] | None = None
+
+        for trade in trades:
+            if trade.get("trade_key") == trade_key and trade.get("status") == "open":
+                trade.update(patch)
+                updated = trade
+                break
+
+        self._write(data)
+        return updated
+
     def close_trade(self, trade_key: str, close_data: dict[str, Any]) -> dict[str, Any] | None:
         data = self._read()
         trades = data.setdefault("trades", [])

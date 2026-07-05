@@ -183,4 +183,3 @@ def _env_int(name: str, default: int) -> int:
         return int((os.getenv(name) or "").strip() or default)
     except ValueError:
         return default
-

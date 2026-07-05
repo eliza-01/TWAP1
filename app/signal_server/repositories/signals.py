@@ -134,4 +134,3 @@ def _symbol(asset: Any) -> str | None:
         return None
     text = str(asset).upper()
     return text if text.endswith("_USDT") else f"{text}_USDT"
-

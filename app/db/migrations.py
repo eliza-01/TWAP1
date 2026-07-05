@@ -93,6 +93,30 @@ _TABLES = [
             REFERENCES parsed_messages(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     """,
+    """
+    CREATE TABLE IF NOT EXISTS fallback_close_reports (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        trade_key VARCHAR(128) NOT NULL,
+        open_signal_id BIGINT NULL,
+        twap_id BIGINT NULL,
+        symbol VARCHAR(32) NOT NULL,
+        direction VARCHAR(16) NOT NULL,
+        opened_at DATETIME NULL,
+        twap_started_at DATETIME NULL,
+        twap_deadline_at DATETIME NULL,
+        grace_seconds DECIMAL(12, 3) NOT NULL DEFAULT 5.000,
+        triggered_at DATETIME NOT NULL,
+        close_order_id VARCHAR(128) NULL,
+        status VARCHAR(32) NOT NULL,
+        message TEXT NOT NULL,
+        report_json JSON NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_fallback_trade_key (trade_key),
+        KEY idx_fallback_open_signal (open_signal_id),
+        KEY idx_fallback_twap_id (twap_id),
+        KEY idx_fallback_status_created (status, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
 ]
 
 _ALTERS = [
@@ -116,4 +140,3 @@ def migrate() -> None:
                 if exc.errno not in {1060, 1061}:  # duplicate column/key
                     raise
                 logger.debug("Migration skipped existing schema object: %s", query)
-

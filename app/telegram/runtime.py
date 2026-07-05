@@ -542,4 +542,3 @@ def _message_reply_to_id(message: Message) -> int | None:
 
     reply_to_msg_id = getattr(message, "reply_to_msg_id", None)
     return int(reply_to_msg_id) if reply_to_msg_id else None
-

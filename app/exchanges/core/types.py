@@ -103,4 +103,3 @@ class OrderResult:
     message: str
     order_id: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
-

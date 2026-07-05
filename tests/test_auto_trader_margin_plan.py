@@ -187,3 +187,105 @@ def test_auto_trader_opens_signal_with_amount_usdt_like_manual_order(monkeypatch
     assert adapter.request.direction == "long"
     assert adapter.request.volume == 2
     assert adapter.request.amount_usdt == 20
+
+
+def test_fallback_closes_open_trade_after_twap_deadline(monkeypatch, tmp_path) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from app.exchanges.core.types import OrderResult
+    from app.local.trading import auto_trader as module
+    from app.local.trading.auto_trader import LocalAutoTrader
+    from app.local.trading.log_store import LocalTradeStore
+
+    class FakeCloseAdapter:
+        def __init__(self) -> None:
+            self.closed = None
+
+        async def close_position(self, request):
+            self.closed = request
+            return OrderResult(True, "closed", "close-1", {"ok": True})
+
+    class FakeReportStore:
+        def __init__(self) -> None:
+            self.reports = []
+
+        def save(self, report: dict) -> int:
+            self.reports.append(report)
+            return len(self.reports)
+
+    settings = LocalSettings(
+        trading=LocalTradingSettings(
+            fallback_close_enabled=True,
+            fallback_close_grace_seconds=5,
+        )
+    )
+    store = LocalTradeStore(str(tmp_path / "trades.json"))
+    started_at = datetime.now(timezone.utc) - timedelta(minutes=2)
+    store.add_open_trade(
+        {
+            "trade_key": "signal:100",
+            "open_signal_id": 100,
+            "twap_id": 777,
+            "symbol": "HYPEUSDT",
+            "direction": "long",
+            "volume": 1.5,
+            "duration_minutes": 1,
+            "twap_started_at": started_at.isoformat(),
+            "twap_deadline_at": (started_at + timedelta(minutes=1)).isoformat(),
+            "status": "open",
+        }
+    )
+    adapter = FakeCloseAdapter()
+    reports = FakeReportStore()
+    monkeypatch.setattr(module, "get_exchange", lambda *_args, **_kwargs: adapter)
+
+    trader = LocalAutoTrader(FakeSettingsStore(settings), store, reports)
+    asyncio.run(trader.check_fallback_closures())
+
+    assert adapter.closed is not None
+    assert adapter.closed.symbol == "HYPEUSDT"
+    assert adapter.closed.direction == "long"
+    assert adapter.closed.volume == 1.5
+    assert store.list_open_trades() == []
+    assert reports.reports[0]["status"] == "success"
+    assert reports.reports[0]["trade_key"] == "signal:100"
+
+
+def test_fallback_does_not_close_when_disabled(monkeypatch, tmp_path) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from app.local.trading import auto_trader as module
+    from app.local.trading.auto_trader import LocalAutoTrader
+    from app.local.trading.log_store import LocalTradeStore
+
+    class FakeCloseAdapter:
+        def __init__(self) -> None:
+            self.closed = None
+
+        async def close_position(self, request):
+            self.closed = request
+            raise AssertionError("fallback should be disabled")
+
+    settings = LocalSettings(trading=LocalTradingSettings(fallback_close_enabled=False))
+    store = LocalTradeStore(str(tmp_path / "trades.json"))
+    started_at = datetime.now(timezone.utc) - timedelta(minutes=2)
+    store.add_open_trade(
+        {
+            "trade_key": "signal:101",
+            "symbol": "HYPEUSDT",
+            "direction": "short",
+            "volume": 1,
+            "duration_minutes": 1,
+            "twap_started_at": started_at.isoformat(),
+            "twap_deadline_at": (started_at + timedelta(minutes=1)).isoformat(),
+            "status": "open",
+        }
+    )
+    adapter = FakeCloseAdapter()
+    monkeypatch.setattr(module, "get_exchange", lambda *_args, **_kwargs: adapter)
+
+    trader = LocalAutoTrader(FakeSettingsStore(settings), store)
+    asyncio.run(trader.check_fallback_closures())
+
+    assert adapter.closed is None
+    assert len(store.list_open_trades()) == 1

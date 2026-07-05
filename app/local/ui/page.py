@@ -11,12 +11,14 @@ def render_page() -> str:
     .signal-banner.connected { border-color:#238636; background: rgba(35,134,54,.12); }
     .signal-banner.connecting, .signal-banner.reconnecting { border-color:#d29922; background: rgba(210,153,34,.10); }
     .signal-banner.error { border-color:#da3633; background: rgba(218,54,51,.10); }
+    .fallback-warning { display:none; position:sticky; top:0; z-index:10; margin:0 0 12px; padding:12px 14px; border:1px solid #f85149; border-radius:10px; background:rgba(248,81,73,.18); color:#ffdcd7; font-weight:700; }
     code { background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:1px 4px; }
   </style>
 </head>
 <body>
 <main>
   <h1>TWAP Local Client</h1>
+  <div id="fallbackWarning" class="fallback-warning">страховка закрытия сделки по окончанию срока TWAP - отключена!</div>
   <p class="muted">Биржевые токены, сигналы и сделки сохраняются локально в <code>local_data/</code>.</p>
 
   <details open>
@@ -84,6 +86,7 @@ def render_page() -> str:
       Отдельный флаг может игнорировать только <code>TWAPX_MIN_USD</code>, если <code>TWAPX_MIN_TWAP_SHARE_PERCENT</code> выше заданного порога.
       Закрытие выполняется по связанному <code>twap_result</code>. Маржа isolated задаётся через Binance marginType=ISOLATED.
       Объем сделки задаётся в USDT как notional. Если свободной маржи не хватает, клиент подберёт минимальное плечо, но не выше лимита.
+      Страховка закрытия проверяет открытые авто-сделки локально и закрывает их после окончания TWAP, если закрывающий сигнал не пришёл.
     </p>
     <div class="grid">
       <div><label>Автоторговля</label><select id="autoTradingEnabled"><option value="false">Выключена</option><option value="true">Включена</option></select></div>
@@ -95,15 +98,19 @@ def render_page() -> str:
       <div><label>Отключить фильтр сигналов</label><select id="disableSignalFilters"><option value="false">Нет</option><option value="true">Да, входить и по rejected</option></select></div>
       <div><label>Игнорировать TWAPX_MIN_USD по доле рынка</label><select id="ignoreMinUsdByShare"><option value="false">Нет</option><option value="true">Да, только min USD</option></select></div>
       <div><label>Порог TWAP share, %</label><input id="minUsdOverrideShare" type="number" step="0.01" min="0.01" value="1" /></div>
+      <div><label>Страховка закрытия TWAP</label><select id="fallbackCloseEnabled" onchange="updateFallbackWarning()"><option value="false">Выключена</option><option value="true">Включена</option></select></div>
+      <div><label>Задержка страховки после TWAP, сек</label><input id="fallbackCloseGraceSeconds" type="number" step="1" min="0" value="5" /></div>
     </div>
     <div class="row" style="margin-top:10px">
       <button onclick="saveSettings()">Сохранить автоторговлю</button>
       <button class="secondary" onclick="loadTradingLogs()">Обновить логи</button>
       <button class="secondary" onclick="loadOpenTrades()">Открытые авто-сделки</button>
+      <button class="secondary" onclick="loadFallbackReports()">Отчеты страховки</button>
     </div>
     <pre id="autoStatus" class="status"></pre>
     <table><thead><tr><th>Время</th><th>Тип</th><th>Действие</th><th>Символ</th><th>Сообщение</th></tr></thead><tbody id="tradeLogs"></tbody></table>
-    <table><thead><tr><th>Trade key</th><th>Символ</th><th>Сторона</th><th>Маржа</th><th>Объем USDT</th><th>Quantity</th><th>Плечо</th><th>Открыт</th><th>Order</th></tr></thead><tbody id="openTrades"></tbody></table>
+    <table><thead><tr><th>Trade key</th><th>Символ</th><th>Сторона</th><th>Маржа</th><th>Объем USDT</th><th>Quantity</th><th>Плечо</th><th>TWAP deadline</th><th>Открыт</th><th>Order</th></tr></thead><tbody id="openTrades"></tbody></table>
+    <table><thead><tr><th>ID</th><th>Время</th><th>Статус</th><th>Trade key</th><th>Символ</th><th>Сообщение</th></tr></thead><tbody id="fallbackReports"></tbody></table>
   </details>
 
   <details open>
@@ -172,6 +179,9 @@ async function init() {
   $('disableSignalFilters').value = String(settings.trading?.disable_signal_filters || false);
   $('ignoreMinUsdByShare').value = String(settings.trading?.ignore_min_usd_by_market_share || false);
   $('minUsdOverrideShare').value = settings.trading?.min_usd_override_twap_share_percent || 1;
+  $('fallbackCloseEnabled').value = String(settings.trading?.fallback_close_enabled || false);
+  $('fallbackCloseGraceSeconds').value = settings.trading?.fallback_close_grace_seconds ?? 5;
+  updateFallbackWarning();
   applyMinVolumeFlag();
   await checkStatus();
   try { await loadAssets(false); await loadRules(); } catch(e) { show('rules', e.message); }
@@ -179,8 +189,12 @@ async function init() {
   await loadSignals();
   await loadTradingLogs();
   await loadOpenTrades();
+  await loadFallbackReports();
   setInterval(signalStatus, 5000);
   setInterval(loadSignals, 5000);
+  setInterval(loadTradingLogs, 10000);
+  setInterval(loadOpenTrades, 10000);
+  setInterval(loadFallbackReports, 10000);
 }
 function applyMinVolumeFlag() {
   const useMin = $('useMinVolume').value === 'true';
@@ -210,7 +224,9 @@ async function saveSettings() {
       max_auto_leverage: $('useMinVolume').value === 'true' ? 1 : Number($('maxAutoLeverage').value || 20),
       disable_signal_filters: $('disableSignalFilters').value === 'true',
       ignore_min_usd_by_market_share: $('ignoreMinUsdByShare').value === 'true',
-      min_usd_override_twap_share_percent: Number($('minUsdOverrideShare').value || 1)
+      min_usd_override_twap_share_percent: Number($('minUsdOverrideShare').value || 1),
+      fallback_close_enabled: $('fallbackCloseEnabled').value === 'true',
+      fallback_close_grace_seconds: Number($('fallbackCloseGraceSeconds').value || 5)
     }
   };
   if ($('binanceApiKey').value) patch.exchanges.binance.api_key = $('binanceApiKey').value;
@@ -218,7 +234,14 @@ async function saveSettings() {
   const saved = await api('/api/settings', {method:'PUT', body: JSON.stringify(patch)});
   show('status', saved);
   show('autoStatus', saved.trading);
+  updateFallbackWarning();
   await signalStatus();
+}
+function updateFallbackWarning() {
+  const banner = $('fallbackWarning');
+  if (!banner) return;
+  const enabled = $('fallbackCloseEnabled')?.value === 'true';
+  banner.style.display = enabled ? 'none' : 'block';
 }
 async function checkStatus() { try { show('status', await api(`/api/exchanges/${selected}/status`)); } catch(e) { show('status', e.message); } }
 async function loadBalance() { try { show('status', await api(`/api/exchanges/${selected}/balance`)); } catch(e) { show('status', e.message); } }
@@ -389,7 +412,11 @@ async function loadTradingLogs() {
 }
 async function loadOpenTrades() {
   const data = await api('/api/trading/open-trades');
-  $('openTrades').innerHTML = data.items.map(x => `<tr><td>${esc(x.trade_key || '')}</td><td>${esc(x.symbol || '')}</td><td>${esc(x.direction || '')}</td><td>${fmtMoney(x.estimated_margin_usdt)}</td><td>${fmtMoney(x.notional_usdt)}</td><td>${x.volume || ''}</td><td>${x.leverage || ''}x${x.auto_leverage_used ? ' ⚡' : ''}</td><td>${x.opened_at || ''}</td><td>${x.open_order_id || ''}</td></tr>`).join('');
+  $('openTrades').innerHTML = data.items.map(x => `<tr><td>${esc(x.trade_key || '')}</td><td>${esc(x.symbol || '')}</td><td>${esc(x.direction || '')}</td><td>${fmtMoney(x.estimated_margin_usdt)}</td><td>${fmtMoney(x.notional_usdt)}</td><td>${x.volume || ''}</td><td>${x.leverage || ''}x${x.auto_leverage_used ? ' ⚡' : ''}</td><td>${x.twap_deadline_at || ''}</td><td>${x.opened_at || ''}</td><td>${x.open_order_id || ''}</td></tr>`).join('');
+}
+async function loadFallbackReports() {
+  const data = await api('/api/trading/fallback-reports?limit=100');
+  $('fallbackReports').innerHTML = data.items.map(x => `<tr><td>${x.id || ''}</td><td>${x.triggered_at || x.created_at || ''}</td><td><span class="pill ${x.status === 'success' ? 'ok' : (x.status === 'error' ? 'bad' : '')}">${esc(x.status || '')}</span></td><td>${esc(x.trade_key || '')}</td><td>${esc(x.symbol || '')}</td><td>${esc(x.message || '')}</td></tr>`).join('');
 }
 init();
 </script>
