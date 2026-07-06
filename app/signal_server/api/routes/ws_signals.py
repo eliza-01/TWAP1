@@ -10,5 +10,6 @@ router = APIRouter(tags=["signals"])
 
 @router.websocket("/ws/signals")
 async def ws_signals(websocket: WebSocket) -> None:
-    if await check_websocket(websocket):
-        await signal_hub.connect(websocket)
+    session = await check_websocket(websocket)
+    if session is not None:
+        await signal_hub.connect(websocket, session)

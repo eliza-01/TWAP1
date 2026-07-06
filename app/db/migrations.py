@@ -117,6 +117,84 @@ _TABLES = [
         KEY idx_fallback_status_created (status, created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     """,
+    """
+    CREATE TABLE IF NOT EXISTS software_users (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        login VARCHAR(64) NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        telegram_user_id BIGINT NOT NULL,
+        telegram_chat_id BIGINT NOT NULL,
+        access_until DATETIME NULL,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_software_users_login (login),
+        UNIQUE KEY uq_software_users_telegram (telegram_user_id),
+        KEY idx_software_users_access (access_until, is_active)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS activation_keys (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        key_hash CHAR(64) NOT NULL,
+        duration_seconds BIGINT NOT NULL,
+        note VARCHAR(255) NOT NULL DEFAULT '',
+        expires_at DATETIME NULL,
+        used_by_user_id BIGINT UNSIGNED NULL,
+        used_at DATETIME NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_activation_key_hash (key_hash),
+        KEY idx_activation_keys_used (used_at),
+        KEY idx_activation_keys_expires (expires_at),
+        CONSTRAINT fk_activation_keys_user FOREIGN KEY (used_by_user_id)
+            REFERENCES software_users(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS login_codes (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        user_id BIGINT UNSIGNED NOT NULL,
+        code_hash CHAR(64) NOT NULL,
+        purpose VARCHAR(32) NOT NULL DEFAULT 'login',
+        expires_at DATETIME NOT NULL,
+        used_at DATETIME NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_login_codes_user (user_id, purpose, expires_at, used_at),
+        CONSTRAINT fk_login_codes_user FOREIGN KEY (user_id)
+            REFERENCES software_users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS telegram_registration_codes (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        telegram_user_id BIGINT NOT NULL,
+        telegram_chat_id BIGINT NOT NULL,
+        code_hash CHAR(64) NOT NULL,
+        expires_at DATETIME NOT NULL,
+        used_at DATETIME NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_tg_registration_code (code_hash, expires_at, used_at),
+        KEY idx_tg_registration_user (telegram_user_id, expires_at, used_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS user_sessions (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        user_id BIGINT UNSIGNED NOT NULL,
+        token_hash CHAR(64) NOT NULL,
+        device_id VARCHAR(128) NOT NULL DEFAULT '',
+        device_name VARCHAR(255) NOT NULL DEFAULT '',
+        started_at DATETIME NOT NULL,
+        last_seen_at DATETIME NOT NULL,
+        closed_at DATETIME NULL,
+        close_reason VARCHAR(64) NOT NULL DEFAULT '',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_user_sessions_token (token_hash),
+        KEY idx_user_sessions_user_active (user_id, closed_at, last_seen_at),
+        CONSTRAINT fk_user_sessions_user FOREIGN KEY (user_id)
+            REFERENCES software_users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """
 ]
 
 _ALTERS = [
@@ -140,3 +218,4 @@ def migrate() -> None:
                 if exc.errno not in {1060, 1061}:  # duplicate column/key
                     raise
                 logger.debug("Migration skipped existing schema object: %s", query)
+

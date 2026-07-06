@@ -19,7 +19,27 @@ def render_page() -> str:
 <main>
   <h1>TWAP Local Client</h1>
   <div id="fallbackWarning" class="fallback-warning">страховка закрытия сделки по окончанию срока TWAP - отключена!</div>
-  <p class="muted">Биржевые токены, сигналы и сделки сохраняются локально в <code>local_data/</code>.</p>
+  <p class="muted">Биржевые токены, фильтры, сигналы и сделки сохраняются локально в <code>local_data/</code>. Доступ к серверу сигналов — через аккаунт, привязанный к Telegram.</p>
+
+  <details open>
+    <summary>0. Аккаунт и Telegram-код</summary>
+    <p class="muted">
+      Регистрация и коды входа выдаются Telegram-ботом. В боте: <code>/register login password</code>, затем <code>/code</code>.
+      Для каждого входа нужен свежий код. Одновременно один аккаунт может быть запущен только на одном устройстве.
+    </p>
+    <div class="grid">
+      <div><label>Логин</label><input id="authLogin" placeholder="login" /></div>
+      <div><label>Пароль</label><input id="authPassword" placeholder="password" type="password" /></div>
+      <div><label>Код из Telegram-бота</label><input id="authCode" placeholder="6 цифр" /></div>
+      <div><label>Текущее устройство</label><input id="authDeviceName" placeholder="local-client" /></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button onclick="loginAccount()">Войти</button>
+      <button class="secondary" onclick="loadAuthStatus()">Статус аккаунта</button>
+      <button class="danger" onclick="logoutAccount()">Выйти</button>
+    </div>
+    <pre id="authStatus" class="status"></pre>
+  </details>
 
   <details open>
     <summary>1. Биржа и подключение</summary>
@@ -84,8 +104,8 @@ def render_page() -> str:
     <summary>4. Автоторговля по сигналам</summary>
     <p class="muted">
       Автоторговля открывает сделки только по новым <code>twap_created</code> после момента включения.
-      По умолчанию берутся только сигналы, прошедшие фильтр. Опция отключения фильтра разрешает вход и по rejected-сигналам.
-      Отдельный флаг может игнорировать только <code>TWAPX_MIN_USD</code>, если <code>TWAPX_MIN_TWAP_SHARE_PERCENT</code> выше заданного порога.
+      Фильтры сделки теперь локальные и индивидуальные для пользователя. Сервер только доставляет нормализованный сигнал.
+      Отдельный флаг может игнорировать только локальный минимальный USD, если TWAP share выше заданного порога.
       Закрытие выполняется по связанному <code>twap_result</code>. Маржа isolated задаётся через Binance marginType=ISOLATED.
       Объем сделки задаётся в USDT как notional. Если свободной маржи не хватает, клиент подберёт минимальное плечо, но не выше лимита.
       Страховка закрытия проверяет открытые авто-сделки локально и закрывает их после окончания TWAP, если закрывающий сигнал не пришёл.
@@ -97,8 +117,12 @@ def render_page() -> str:
       <div><label>Базовое плечо</label><input id="autoLeverage" type="number" min="1" value="1" /></div>
       <div><label>Авто-плечо при нехватке средств</label><select id="autoLeverageEnabled"><option value="true">Да</option><option value="false">Нет</option></select></div>
       <div><label>Максимальное авто-плечо</label><input id="maxAutoLeverage" type="number" min="1" value="20" /></div>
-      <div><label>Отключить фильтр сигналов</label><select id="disableSignalFilters"><option value="false">Нет</option><option value="true">Да, входить и по rejected</option></select></div>
-      <div><label>Игнорировать TWAPX_MIN_USD по доле рынка</label><select id="ignoreMinUsdByShare"><option value="false">Нет</option><option value="true">Да, только min USD</option></select></div>
+      <div><label>Локальные фильтры входа</label><select id="localSignalFiltersEnabled"><option value="true">Включены</option><option value="false">Отключены, входить по всем сигналам</option></select></div>
+      <div><label>Мин. TWAP объем, USD</label><input id="filterMinUsd" type="number" step="1000" min="0" value="300000" /></div>
+      <div><label>Макс. длительность TWAP, мин</label><input id="filterMaxDuration" type="number" step="1" min="1" value="30" /></div>
+      <div><label>Макс. market volume, USD</label><input id="filterMaxMarketVolume" type="number" step="1000000" min="1" value="100000000" /></div>
+      <div><label>Мин. TWAP share, %</label><input id="filterMinShare" type="number" step="0.01" min="0" value="0.5" /></div>
+      <div><label>Игнорировать min USD по доле рынка</label><select id="ignoreMinUsdByShare"><option value="false">Нет</option><option value="true">Да, только min USD</option></select></div>
       <div><label>Порог TWAP share, %</label><input id="minUsdOverrideShare" type="number" step="0.01" min="0.01" value="1" /></div>
       <div><label>Страховка закрытия TWAP</label><select id="fallbackCloseEnabled" onchange="updateFallbackWarning()"><option value="false">Выключена</option><option value="true">Включена</option></select></div>
       <div><label>Задержка страховки после TWAP, сек</label><input id="fallbackCloseGraceSeconds" type="number" step="1" min="0" value="5" /></div>
@@ -118,8 +142,8 @@ def render_page() -> str:
   <details open>
     <summary>5. Сервер сигналов</summary>
     <p class="muted">
-      Сигналы слушаются всегда через WebSocket. Адреса берутся из <code>LOCAL_SIGNAL_WS_URL</code> и <code>LOCAL_SIGNAL_HTTP_URL</code> в <code>.env</code>, вручную в интерфейсе не вводятся.
-      Защитный ключ тоже берётся только из <code>LOCAL_SIGNAL_ACCESS_KEY</code> / <code>SIGNAL_SERVER_ACCESS_KEY</code> и в UI не показывается.
+      Сигналы слушаются через WebSocket после входа в аккаунт. Адреса берутся из <code>LOCAL_SIGNAL_WS_URL</code> и <code>LOCAL_SIGNAL_HTTP_URL</code> в <code>.env</code>.
+      Биржевые ключи остаются локально, а сервер проверяет только пользовательскую сессию.
     </p>
     <div id="signalBanner" class="signal-banner">
       <b>Состояние неизвестно</b>
@@ -167,6 +191,9 @@ async function init() {
     await loadAssets(false);
   };
   const settings = await api('/api/settings');
+  $('authLogin').value = settings.account?.login || '';
+  $('authDeviceName').value = settings.account?.device_name || 'local-client';
+  await loadAuthStatus();
   $('binanceEnabled').value = String(settings.exchanges?.binance?.enabled || false);
   $('binanceHedgeMode').value = String(settings.exchanges?.binance?.hedge_mode_enabled ?? true);
   $('amountUsdt').value = settings.trading?.default_volume || 10;
@@ -179,7 +206,12 @@ async function init() {
   $('autoLeverage').value = settings.trading?.default_leverage || 1;
   $('autoLeverageEnabled').value = String(settings.trading?.auto_leverage_enabled ?? true);
   $('maxAutoLeverage').value = settings.trading?.max_auto_leverage || 20;
-  $('disableSignalFilters').value = String(settings.trading?.disable_signal_filters || false);
+  const sf = settings.trading?.signal_filters || {};
+  $('localSignalFiltersEnabled').value = String(sf.enabled ?? true);
+  $('filterMinUsd').value = sf.min_usd ?? 300000;
+  $('filterMaxDuration').value = sf.max_duration_minutes ?? 30;
+  $('filterMaxMarketVolume').value = sf.max_market_volume_usd ?? 100000000;
+  $('filterMinShare').value = sf.min_twap_share_percent ?? 0.5;
   $('ignoreMinUsdByShare').value = String(settings.trading?.ignore_min_usd_by_market_share || false);
   $('minUsdOverrideShare').value = settings.trading?.min_usd_override_twap_share_percent || 1;
   $('fallbackCloseEnabled').value = String(settings.trading?.fallback_close_enabled || false);
@@ -225,7 +257,14 @@ async function saveSettings() {
       auto_order_usdt: Number($('autoOrderUsdt').value || 10),
       auto_leverage_enabled: $('useMinVolume').value === 'true' ? false : $('autoLeverageEnabled').value === 'true',
       max_auto_leverage: $('useMinVolume').value === 'true' ? 1 : Number($('maxAutoLeverage').value || 20),
-      disable_signal_filters: $('disableSignalFilters').value === 'true',
+      disable_signal_filters: true,
+      signal_filters: {
+        enabled: $('localSignalFiltersEnabled').value === 'true',
+        min_usd: Number($('filterMinUsd').value || 0),
+        max_duration_minutes: Number($('filterMaxDuration').value || 30),
+        max_market_volume_usd: Number($('filterMaxMarketVolume').value || 100000000),
+        min_twap_share_percent: Number($('filterMinShare').value || 0)
+      },
       ignore_min_usd_by_market_share: $('ignoreMinUsdByShare').value === 'true',
       min_usd_override_twap_share_percent: Number($('minUsdOverrideShare').value || 1),
       fallback_close_enabled: $('fallbackCloseEnabled').value === 'true',
@@ -246,6 +285,46 @@ function updateFallbackWarning() {
   const enabled = $('fallbackCloseEnabled')?.value === 'true';
   banner.style.display = enabled ? 'none' : 'block';
 }
+
+async function loadAuthStatus() {
+  try {
+    const data = await api('/api/auth/status');
+    show('authStatus', data);
+    return data;
+  } catch(e) {
+    show('authStatus', e.message);
+    return null;
+  }
+}
+async function loginAccount() {
+  try {
+    const data = await api('/api/auth/login', {
+      method:'POST',
+      body: JSON.stringify({
+        login: $('authLogin').value,
+        password: $('authPassword').value,
+        code: $('authCode').value,
+        device_name: $('authDeviceName').value
+      })
+    });
+    $('authPassword').value = '';
+    $('authCode').value = '';
+    show('authStatus', data);
+    await signalStatus();
+  } catch(e) {
+    show('authStatus', e.message);
+  }
+}
+async function logoutAccount() {
+  try {
+    const data = await api('/api/auth/logout', {method:'POST', body: JSON.stringify({})});
+    show('authStatus', data);
+    await signalStatus();
+  } catch(e) {
+    show('authStatus', e.message);
+  }
+}
+
 async function checkStatus() { try { show('status', await api(`/api/exchanges/${selected}/status`)); } catch(e) { show('status', e.message); } }
 async function loadBalance() { try { show('status', await api(`/api/exchanges/${selected}/balance`)); } catch(e) { show('status', e.message); } }
 async function loadAssets(renderStatus = true) {
@@ -425,4 +504,3 @@ init();
 </script>
 </body>
 </html>"""
-

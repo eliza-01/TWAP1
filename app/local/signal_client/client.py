@@ -4,7 +4,6 @@ import asyncio
 import inspect
 import json
 import logging
-import os
 import random
 import time
 from datetime import datetime, timezone
@@ -74,7 +73,9 @@ class LocalSignalClient:
             "message": self._message,
             "server_ws_url": settings.signals.server_ws_url,
             "server_http_url": settings.signals.server_http_url,
-            "has_access_key": bool(_access_key()),
+            "authenticated": bool(settings.account.session_token),
+            "account_login": settings.account.login,
+            "access_until": settings.account.access_until,
             "connected_at": self._connected_at,
             "last_error_at": self._last_error_at,
             "last_signal_at": self._last_signal_at,
@@ -106,16 +107,31 @@ class LocalSignalClient:
 
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(f"{http_url}/health", headers=_access_headers())
-                response.raise_for_status()
-                data = response.json()
+                health_response = await client.get(f"{http_url}/health")
+                health_response.raise_for_status()
+                health_data = health_response.json()
+
+                auth_data = None
+                if settings.account.session_token:
+                    auth_response = await client.get(
+                        f"{http_url}/api/auth/me",
+                        headers=_session_headers(settings.account.session_token),
+                    )
+                    auth_response.raise_for_status()
+                    auth_data = auth_response.json()
         except httpx.HTTPStatusError as exc:
             body = exc.response.text[:500] if exc.response is not None else ""
             return {**self.status(), "health_ok": False, "health_message": f"HTTP {exc.response.status_code}: {body}"}
         except Exception as exc:
             return {**self.status(), "health_ok": False, "health_message": f"Сервер сигналов недоступен: {exc}"}
 
-        return {**self.status(), "health_ok": True, "health_message": "HTTP /health OK", "health_response": data}
+        return {
+            **self.status(),
+            "health_ok": True,
+            "health_message": "HTTP /health OK",
+            "health_response": health_data,
+            "auth_response": auth_data,
+        }
 
     def _reset_local_signal_state_on_startup(self) -> None:
         recent_cleared = self.signal_store.clear()
@@ -143,16 +159,20 @@ class LocalSignalClient:
                 self._set_state("not_configured", "LOCAL_SIGNAL_WS_URL не задан в .env")
                 await self._sleep(2)
                 continue
+            if not settings.account.session_token:
+                self._set_state("unauthorized", "Войдите в аккаунт: нужен логин, пароль и код из Telegram-бота")
+                await self._sleep(2)
+                continue
 
             self._last_ws_url = url
             self._set_state("connecting", f"Подключение к {url}")
             try:
                 logger.info("Signal WS connecting: %s", url)
-                async with _connect_ws(url, _access_headers()) as ws:
+                async with _connect_ws(url, _session_headers(settings.account.session_token)) as ws:
                     reconnect_delay = 1.0
                     self._set_state("connected", "WebSocket подключен")
                     self._connected_at = _now_iso()
-                    logger.info("Signal WS connected")
+                    logger.info("Signal WS connected as %s", settings.account.login or "unknown")
                     hello = {
                         "type": "hello",
                         "last_signal_id": settings.signals.last_signal_id,
@@ -161,8 +181,13 @@ class LocalSignalClient:
                         hello["fresh_start"] = True
                         hello["fresh_start_after"] = self._started_at.isoformat()
                     await ws.send(json.dumps(hello, ensure_ascii=False))
-                    async for raw in ws:
-                        await self._handle_message(raw)
+                    ping_task = asyncio.create_task(_ws_ping_loop(ws))
+                    try:
+                        async for raw in ws:
+                            await self._handle_message(raw)
+                    finally:
+                        ping_task.cancel()
+                        await asyncio.gather(ping_task, return_exceptions=True)
             except Exception as exc:
                 self._last_error_at = _now_iso()
                 self._connected_at = ""
@@ -254,13 +279,15 @@ class LocalSignalClient:
         self._message = message
 
 
-def _access_key() -> str:
-    return (os.getenv("LOCAL_SIGNAL_ACCESS_KEY") or "").strip()
+def _session_headers(token: str) -> dict[str, str]:
+    token = (token or "").strip()
+    return {"Authorization": f"Bearer {token}", "X-Client-Session-Token": token} if token else {}
 
 
-def _access_headers() -> dict[str, str]:
-    key = _access_key()
-    return {"Authorization": f"Bearer {key}", "X-Signal-Access-Key": key} if key else {}
+async def _ws_ping_loop(ws) -> None:
+    while True:
+        await asyncio.sleep(30)
+        await ws.send(json.dumps({"type": "client.ping"}, ensure_ascii=False))
 
 
 def _connect_ws(url: str, headers: dict[str, str]):
@@ -312,4 +339,3 @@ def _parse_dt(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
-

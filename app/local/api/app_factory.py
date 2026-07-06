@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from app.local.api.deps import signal_client
 from app.local.api.routes import (
+    auth,
     exchange_assets,
     exchange_balance,
     exchange_positions,
@@ -36,6 +37,7 @@ def create_local_app() -> FastAPI:
         return JSONResponse(status_code=400, content={"success": False, "message": str(exc)})
     for router in [
         ui.router,
+        auth.router,
         settings_get.router,
         settings_save.router,
         exchanges_list.router,

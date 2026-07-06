@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import os
 import secrets
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import HTTPException, Request, WebSocket
 
+from app.platform.accounts.repository import AccountRepository
 from app.signal_server.security.rate_limit import (
     env_float,
     env_int,
@@ -18,28 +19,73 @@ HttpScope = Literal["global", "health", "pending"]
 
 
 def required_access_key() -> str:
+    # Legacy server-to-server key. User clients should use account sessions.
     return (os.getenv("SIGNAL_SERVER_ACCESS_KEY") or "").strip()
 
 
 def check_http_request(request: Request, scope: HttpScope = "global") -> None:
     _check_http_rate(request, scope)
-    key = required_access_key()
-    if not key:
+    # Health/global rate limit is public. Protected API routes call require_http_session().
+    if scope in {"global", "health"}:
         return
-    if not _safe_equal(_request_key(request), key):
-        raise HTTPException(status_code=401, detail="Invalid signal server access key")
+
+    key = required_access_key()
+    if key and _safe_equal(_request_key(request), key):
+        return
+
+    # Otherwise pending routes require a personal session token.
+    require_http_session(request)
 
 
-async def check_websocket(websocket: WebSocket) -> bool:
+def require_http_session(request: Request, require_active_access: bool = True) -> dict[str, Any]:
+    _check_http_rate(request, "pending")
+    token = bearer_token_from_request(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Не указан токен сессии")
+    session = AccountRepository().validate_session_token(token, require_active_access=require_active_access)
+    if not session:
+        raise HTTPException(status_code=401, detail="Сессия недействительна, истекла или аккаунт не активирован")
+    return session
+
+
+async def check_websocket(websocket: WebSocket) -> dict[str, Any] | None:
     if not _check_ws_rate(websocket):
         await websocket.close(code=1013)
-        return False
+        return None
 
+    # Legacy shared key still works for internal stage/debug clients, but does not
+    # create a user identity and should not be shipped to customers.
     key = required_access_key()
-    if key and not _safe_equal(_websocket_key(websocket), key):
+    if key and _safe_equal(_websocket_key(websocket), key):
+        return {"legacy": True, "session_id": 0, "user_id": 0, "user": {"login": "legacy"}}
+
+    token = websocket_token(websocket)
+    if not token:
         await websocket.close(code=1008)
-        return False
-    return True
+        return None
+
+    session = AccountRepository().validate_session_token(token, require_active_access=True)
+    if not session:
+        await websocket.close(code=1008)
+        return None
+    return session
+
+
+def bearer_token_from_request(request: Request) -> str:
+    token = _bearer(request.headers.get("authorization"))
+    if token:
+        return token
+    return (request.headers.get("x-client-session-token") or "").strip()
+
+
+def websocket_token(websocket: WebSocket) -> str:
+    token = _bearer(websocket.headers.get("authorization"))
+    if token:
+        return token
+    token = (websocket.headers.get("x-client-session-token") or "").strip()
+    if token:
+        return token
+    return str(websocket.query_params.get("token") or "").strip()
 
 
 def _check_http_rate(request: Request, scope: HttpScope) -> None:
@@ -48,8 +94,8 @@ def _check_http_rate(request: Request, scope: HttpScope) -> None:
         max_calls = env_int("SIGNAL_SERVER_HEALTH_MAX_PER_MINUTE", 30)
         min_interval = env_float("SIGNAL_SERVER_HEALTH_MIN_INTERVAL_SECONDS", 2.0)
     elif scope == "pending":
-        max_calls = env_int("SIGNAL_SERVER_PENDING_MAX_PER_MINUTE", 12)
-        min_interval = env_float("SIGNAL_SERVER_PENDING_MIN_INTERVAL_SECONDS", 5.0)
+        max_calls = env_int("SIGNAL_SERVER_PENDING_MAX_PER_MINUTE", 60)
+        min_interval = env_float("SIGNAL_SERVER_PENDING_MIN_INTERVAL_SECONDS", 1.0)
     else:
         max_calls = env_int("SIGNAL_SERVER_HTTP_MAX_PER_MINUTE", 300)
         min_interval = 0.0
@@ -101,3 +147,4 @@ def _bearer(value: str | None) -> str:
 
 def _safe_equal(left: str, right: str) -> bool:
     return secrets.compare_digest(left.encode(), right.encode())
+

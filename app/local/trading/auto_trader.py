@@ -175,8 +175,8 @@ class LocalAutoTrader:
             if settings.trading.disable_signal_filters:
                 self.trade_store.add_log(
                     "warning",
-                    "filter_disabled",
-                    f"Фильтр сигналов отключен: вход по status={status}, reason={signal.get('reason') or 'n/a'}",
+                    "server_filter_ignored",
+                    f"Серверный status/reason проигнорирован: вход по status={status}, reason={signal.get('reason') or 'n/a'}",
                     signal,
                 )
             elif _should_bypass_min_usd_by_share(settings, signal):
@@ -185,18 +185,42 @@ class LocalAutoTrader:
                 self.trade_store.add_log(
                     "warning",
                     "min_usd_bypassed_by_share",
-                    f"TWAPX_MIN_USD проигнорирован: TWAP share={_fmt(share)}% > {_fmt(threshold)}%",
+                    f"Минимальный USD проигнорирован: TWAP share={_fmt(share)}% > {_fmt(threshold)}%",
                     signal,
                 )
             else:
                 self.trade_store.add_log(
                     "info",
-                    "skip_filtered_signal",
-                    f"Сигнал пропущен фильтром: status={status}, reason={signal.get('reason') or 'n/a'}",
+                    "skip_server_filtered_signal",
+                    f"Сигнал пропущен серверным статусом: status={status}, reason={signal.get('reason') or 'n/a'}",
                     signal,
                 )
                 self.trade_store.mark_signal_processed(signal_id)
                 return
+
+        if kind == "twap_created":
+            local_filter_errors = _local_filter_errors(settings, signal)
+            if local_filter_errors:
+                if _should_bypass_local_min_usd_by_share(settings, signal, local_filter_errors):
+                    share = _signal_share_percent(signal)
+                    threshold = settings.trading.min_usd_override_twap_share_percent
+                    self.trade_store.add_log(
+                        "warning",
+                        "local_min_usd_bypassed_by_share",
+                        f"Локальный min USD проигнорирован: TWAP share={_fmt(share)}% > {_fmt(threshold)}%",
+                        signal,
+                        raw={"local_filter_errors": local_filter_errors},
+                    )
+                else:
+                    self.trade_store.add_log(
+                        "info",
+                        "skip_local_filtered_signal",
+                        "Сигнал пропущен локальными фильтрами: " + ";".join(local_filter_errors),
+                        signal,
+                        raw={"local_filter_errors": local_filter_errors},
+                    )
+                    self.trade_store.mark_signal_processed(signal_id)
+                    return
 
         try:
             if kind == "twap_created":
@@ -512,6 +536,72 @@ async def _build_open_plan(settings: LocalSettings, adapter: Any, symbol: str, r
     )
 
 
+
+
+def _local_filter_errors(settings: LocalSettings, signal: dict[str, Any]) -> list[str]:
+    filters = getattr(settings.trading, "signal_filters", None)
+    if filters is None or not getattr(filters, "enabled", True):
+        return []
+
+    errors: list[str] = []
+    amount_usd = _signal_float(signal, "amount_usd")
+    duration_minutes = _signal_float(signal, "duration_minutes")
+    market_volume_usd = _signal_float(signal, "market_volume_usd")
+    share = _signal_share_percent(signal)
+
+    min_usd = float(getattr(filters, "min_usd", 0) or 0)
+    max_duration = float(getattr(filters, "max_duration_minutes", 0) or 0)
+    max_market_volume = float(getattr(filters, "max_market_volume_usd", 0) or 0)
+    min_share = float(getattr(filters, "min_twap_share_percent", 0) or 0)
+
+    if amount_usd is None:
+        errors.append("missing_amount_usd")
+    elif min_usd > 0 and amount_usd < min_usd:
+        errors.append(f"amount_usd_lt_{min_usd:g}")
+
+    if duration_minutes is None:
+        errors.append("missing_duration_minutes")
+    elif max_duration > 0 and duration_minutes > max_duration:
+        errors.append(f"duration_gt_{max_duration:g}_minutes")
+
+    if market_volume_usd is None:
+        errors.append("missing_market_volume_usd")
+    elif max_market_volume > 0 and market_volume_usd >= max_market_volume:
+        errors.append(f"market_volume_gte_{max_market_volume:g}")
+
+    if share is None:
+        errors.append("missing_twap_share_percent")
+    elif min_share > 0 and share <= min_share:
+        errors.append(f"twap_share_lte_{min_share:g}_percent")
+
+    return errors
+
+
+def _should_bypass_local_min_usd_by_share(
+    settings: LocalSettings,
+    signal: dict[str, Any],
+    errors: list[str],
+) -> bool:
+    if not settings.trading.ignore_min_usd_by_market_share:
+        return False
+    if not errors or not any(error.startswith("amount_usd_lt_") for error in errors):
+        return False
+    hard_errors = [error for error in errors if not error.startswith("amount_usd_lt_")]
+    if hard_errors:
+        return False
+    threshold = float(settings.trading.min_usd_override_twap_share_percent or 0)
+    if threshold <= 0:
+        return False
+    share = _signal_share_percent(signal)
+    return share is not None and share > threshold
+
+
+def _signal_float(signal: dict[str, Any], key: str) -> float | None:
+    value = signal.get(key)
+    if value is None and isinstance(signal.get("payload"), dict):
+        value = signal["payload"].get(key)
+    return _float_or_none(value)
+
 def _should_bypass_min_usd_by_share(settings: LocalSettings, signal: dict[str, Any]) -> bool:
     if not settings.trading.ignore_min_usd_by_market_share:
         return False
@@ -743,4 +833,3 @@ def _fmt(value: Any) -> str:
         return f"{float(value):.2f}"
     except (TypeError, ValueError):
         return "0.00"
-

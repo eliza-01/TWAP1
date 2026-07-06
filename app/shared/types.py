@@ -11,10 +11,11 @@ Side = Literal["buy", "sell"]
 
 @dataclass(frozen=True)
 class FilterConfig:
-    min_usd: float
-    max_duration_minutes: float
-    max_market_volume_usd: float
-    min_twap_share_percent: float
+    """Server-side parser filters are intentionally empty.
+
+    Deal filters are local per-user settings in the compiled/local client.
+    """
+    pass
 
 
 @dataclass(frozen=True)

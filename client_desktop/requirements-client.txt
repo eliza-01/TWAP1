@@ -1,0 +1,8 @@
+pyinstaller>=6.0
+fastapi
+uvicorn[standard]
+httpx
+websockets
+python-dotenv
+mysql-connector-python
+argon2-cffi

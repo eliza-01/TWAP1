@@ -41,8 +41,8 @@ def main() -> None:
     settings = load_settings()
 
     if args.command == "local":
-        init_pool(settings.db)
-        migrate()
+        # Desktop/local client must not require direct MySQL access. It talks to
+        # Signal Server over HTTPS/WebSocket and stores its own settings locally.
         port = args.port if args.port is not None else settings.deploy.local_ui_port
         uvicorn.run("app.local.api.app_factory:create_local_app", host=args.host, port=port, factory=True)
         return
@@ -73,3 +73,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

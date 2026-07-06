@@ -25,8 +25,8 @@ SCENARIOS.md
 - `app` — основной Telegram-слушатель.
 - `mysql` — база данных MySQL 8.4.
 - `phpmyadmin` — веб-интерфейс для просмотра БД.
-- `local` — локальный торговый клиент с UI.
-- `signal-server` — центральный HTTP/WebSocket сервер сигналов.
+- `signal-server` — публичный сайт, личный кабинет, admin, HTTP/WebSocket сервер сигналов.
+- `local` — dev-only локальный runner; для пользователей собирается exe из `client_desktop/`.
 
 ## Адреса
 
@@ -35,22 +35,22 @@ SCENARIOS.md
 Prod (`STAGE=OFF`):
 
 ```text
-Публичный домен:  https://twaps.ru
-Локальный клиент: http://localhost:8080
-Signal Server:    http://localhost:8090
-WebSocket:        ws://localhost:8090/ws/signals
-phpMyAdmin:       http://localhost:8081
+Публичный сайт / ЛК: https://twaps.ru
+Signal Server API:   http://localhost:8090
+WebSocket:           ws://localhost:8090/ws/signals
+phpMyAdmin:          http://localhost:8081
 ```
 
 Stage (`STAGE=ON`):
 
 ```text
-Публичный домен:  https://beta.twaps.ru
-Локальный клиент: http://localhost:18080
-Signal Server:    http://localhost:18090
-WebSocket:        ws://localhost:18090/ws/signals
-phpMyAdmin:       http://localhost:18081
+Публичный сайт / ЛК: https://beta.twaps.ru
+Signal Server API:   http://localhost:18090
+WebSocket:           ws://localhost:18090/ws/signals
+phpMyAdmin:          http://localhost:18081
 ```
+
+Локальный торговый интерфейс больше не публикуется на домене. Пользователям отдаётся exe-клиент из `client_desktop/`.
 
 ## Stage / prod запуск
 
@@ -90,18 +90,18 @@ python tools/compose.py --profile server --profile local up -d --build
 Prod (`STAGE=OFF`):
 
 ```text
-twaps.ru      -> http://localhost:8080   # UI
+twaps.ru      -> http://localhost:8090   # сайт, ЛК, admin, API, WebSocket
 /ws/signals   -> http://localhost:8090   # WebSocket Signal Server
-/signals/*    -> http://localhost:8090   # HTTP pending signals
+/api/*        -> http://localhost:8090   # HTTP API
 /health       -> http://localhost:8090   # health check
 ```
 
 Stage (`STAGE=ON`):
 
 ```text
-beta.twaps.ru -> http://localhost:18080  # UI
+beta.twaps.ru -> http://localhost:18090  # сайт, ЛК, admin, API, WebSocket
 /ws/signals   -> http://localhost:18090  # WebSocket Signal Server
-/signals/*    -> http://localhost:18090  # HTTP pending signals
+/api/*        -> http://localhost:18090  # HTTP API
 /health       -> http://localhost:18090  # health check
 ```
 

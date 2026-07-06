@@ -4,7 +4,6 @@ from os import getenv
 
 from app.core.env import (
     env_bool,
-    env_float,
     env_int,
     env_int_list,
     env_stage_bool,
@@ -25,12 +24,7 @@ def load_config() -> SourceGroupConfig:
         target_chat_id=target_chat_id,
         target_thread_id=target_thread_id,
         enabled=env_stage_bool("TWAPX_ENABLED", env_bool("TWAPX_ENABLED", True)),
-        filters=FilterConfig(
-            min_usd=env_float("TWAPX_MIN_USD", 300_000),
-            max_duration_minutes=env_float("TWAPX_MAX_DURATION_MINUTES", 30),
-            max_market_volume_usd=env_float("TWAPX_MAX_MARKET_VOLUME_USD", 100_000_000),
-            min_twap_share_percent=env_float("TWAPX_MIN_TWAP_SHARE_PERCENT", 0.5),
-        ),
+        filters=FilterConfig(),
     )
 
 
