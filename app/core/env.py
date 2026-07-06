@@ -39,6 +39,40 @@ def env_int_list(name: str, default: Iterable[int] | None = None) -> list[int]:
     return [int(item) for item in _split_csv(raw)]
 
 
+def env_stage_str(name: str, default: str = "", stage: bool | None = None) -> str:
+    """Read STAGE_<name> or PROD_<name>, with fallback to common <name>."""
+    stage = env_bool("STAGE", False) if stage is None else stage
+    prefixed_name = f"{'STAGE' if stage else 'PROD'}_{name}"
+    raw = env_str(prefixed_name)
+    if raw:
+        return raw
+    return env_str(name, default)
+
+
+def env_stage_int(name: str, default: int = 0, stage: bool | None = None) -> int:
+    raw = env_stage_str(name, "", stage)
+    return int(raw) if raw else default
+
+
+def env_stage_float(name: str, default: float = 0.0, stage: bool | None = None) -> float:
+    raw = env_stage_str(name, "", stage)
+    return float(raw) if raw else default
+
+
+def env_stage_bool(name: str, default: bool = False, stage: bool | None = None) -> bool:
+    raw = env_stage_str(name, "", stage)
+    if not raw:
+        return default
+    return raw.lower() in {"1", "true", "yes", "y", "on"}
+
+
+def env_stage_int_list(name: str, default: Iterable[int] | None = None, stage: bool | None = None) -> list[int]:
+    raw = env_stage_str(name, "", stage)
+    if not raw:
+        return list(default or [])
+    return [int(item) for item in _split_csv(raw)]
+
+
 def _optional_env_int(name: str) -> int | None:
     raw = env_str(name)
     return int(raw) if raw else None
@@ -125,8 +159,10 @@ def load_deployment_settings() -> DeploymentSettings:
 
 def load_settings() -> AppSettings:
     load_dotenv()
+    deploy = load_deployment_settings()
+    default_session_path = "sessions/twap_stage_user.session" if deploy.stage else "sessions/twap_prod_user.session"
     return AppSettings(
-        deploy=load_deployment_settings(),
+        deploy=deploy,
         db=DbSettings(
             host=env_str("MYSQL_HOST", "mysql"),
             port=env_int("MYSQL_PORT", 3306),
@@ -135,10 +171,10 @@ def load_settings() -> AppSettings:
             password=env_str("MYSQL_PASSWORD", "twap_password"),
         ),
         telegram=TelegramSettings(
-            api_id=env_int("TELEGRAM_API_ID"),
-            api_hash=env_str("TELEGRAM_API_HASH"),
-            phone=env_str("TELEGRAM_PHONE"),
-            session_path=env_str("TELEGRAM_SESSION_PATH", "sessions/twap_user.session"),
+            api_id=env_stage_int("TELEGRAM_API_ID", 0, deploy.stage),
+            api_hash=env_stage_str("TELEGRAM_API_HASH", "", deploy.stage),
+            phone=env_stage_str("TELEGRAM_PHONE", "", deploy.stage),
+            session_path=env_stage_str("TELEGRAM_SESSION_PATH", default_session_path, deploy.stage),
         ),
         debug=DebugSettings(
             enabled=env_bool("DEBUG_ENABLED", False),

@@ -48,6 +48,13 @@ def _value(values: dict[str, str], key: str, default: str) -> str:
     return value if value else default
 
 
+def _profile_value(values: dict[str, str], prefix: str, key: str, default: str = "") -> str:
+    value = values.get(f"{prefix}_{key}", "").strip()
+    if value:
+        return value
+    return _value(values, key, default)
+
+
 def _int_value(values: dict[str, str], key: str, default: int) -> int:
     raw = _value(values, key, str(default))
     try:
@@ -66,6 +73,7 @@ def build_runtime_env(base: dict[str, str]) -> dict[str, str]:
     domain = _value(base, f"{prefix}_DOMAIN", "beta.twaps.ru" if stage else "twaps.ru")
     protocol = _value(base, "PUBLIC_PROTOCOL", "https")
     ws_protocol = "wss" if protocol == "https" else "ws"
+    default_session_path = "sessions/twap_stage_user.session" if stage else "sessions/twap_prod_user.session"
 
     compose_project_name = _value(
         base,
@@ -75,6 +83,7 @@ def build_runtime_env(base: dict[str, str]) -> dict[str, str]:
 
     return {
         "APP_ENV": env_name,
+        "COMPOSE_ENV_FILE": ".env.compose.generated",
         "COMPOSE_PROJECT_NAME": compose_project_name,
         "PUBLIC_DOMAIN": domain,
         "PUBLIC_BASE_URL": f"{protocol}://{domain}",
@@ -83,6 +92,13 @@ def build_runtime_env(base: dict[str, str]) -> dict[str, str]:
         "SIGNAL_SERVER_PORT": str(_int_value(base, f"{prefix}_SIGNAL_SERVER_PORT", 18090 if stage else 8090)),
         "PHPMYADMIN_PORT": str(_int_value(base, f"{prefix}_PHPMYADMIN_PORT", 18081 if stage else 8081)),
         "MYSQL_HOST_PORT": str(_int_value(base, f"{prefix}_MYSQL_HOST_PORT", 13306 if stage else 3306)),
+        "TELEGRAM_API_ID": _profile_value(base, prefix, "TELEGRAM_API_ID"),
+        "TELEGRAM_API_HASH": _profile_value(base, prefix, "TELEGRAM_API_HASH"),
+        "TELEGRAM_PHONE": _profile_value(base, prefix, "TELEGRAM_PHONE"),
+        "TELEGRAM_SESSION_PATH": _profile_value(base, prefix, "TELEGRAM_SESSION_PATH", default_session_path),
+        "TWAPX_SOURCES": _profile_value(base, prefix, "TWAPX_SOURCES"),
+        "TWAPX_TARGET": _profile_value(base, prefix, "TWAPX_TARGET"),
+        "TWAPX_ENABLED": _profile_value(base, prefix, "TWAPX_ENABLED", _value(base, "TWAPX_ENABLED", "true")),
     }
 
 
@@ -118,5 +134,8 @@ if __name__ == "__main__":
         "SIGNAL_SERVER_PORT",
         "PHPMYADMIN_PORT",
         "MYSQL_HOST_PORT",
+        "TELEGRAM_SESSION_PATH",
+        "TWAPX_SOURCES",
+        "TWAPX_TARGET",
     ]:
         print(f"{item}={runtime_values[item]}")

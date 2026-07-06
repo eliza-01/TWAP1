@@ -2,7 +2,7 @@ services:
   app:
     build: .
     container_name: ${COMPOSE_PROJECT_NAME:-twap_prod}_parser_app
-    env_file: .env
+    env_file: ${COMPOSE_ENV_FILE:-.env}
     environment:
       APP_ENV: ${APP_ENV:-prod}
       STAGE: ${STAGE:-OFF}
@@ -20,7 +20,7 @@ services:
   signal-server:
     build: .
     container_name: ${COMPOSE_PROJECT_NAME:-twap_prod}_signal_server
-    env_file: .env
+    env_file: ${COMPOSE_ENV_FILE:-.env}
     environment:
       APP_ENV: ${APP_ENV:-prod}
       STAGE: ${STAGE:-OFF}
@@ -39,7 +39,7 @@ services:
   local:
     build: .
     container_name: ${COMPOSE_PROJECT_NAME:-twap_prod}_local_client
-    env_file: .env
+    env_file: ${COMPOSE_ENV_FILE:-.env}
     environment:
       APP_ENV: ${APP_ENV:-prod}
       STAGE: ${STAGE:-OFF}
@@ -60,7 +60,7 @@ services:
   mysql:
     image: mysql:8.4
     container_name: ${COMPOSE_PROJECT_NAME:-twap_prod}_mysql
-    env_file: .env
+    env_file: ${COMPOSE_ENV_FILE:-.env}
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -80,7 +80,7 @@ services:
   phpmyadmin:
     image: phpmyadmin:latest
     container_name: ${COMPOSE_PROJECT_NAME:-twap_prod}_phpmyadmin
-    env_file: .env
+    env_file: ${COMPOSE_ENV_FILE:-.env}
     environment:
       PMA_HOST: mysql
       PMA_PORT: 3306

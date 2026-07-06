@@ -56,6 +56,28 @@ MySQL host:    13306
 Compose name:  twap_stage
 ```
 
+После выбора окружения заполни соответствующие переменные:
+
+```env
+PROD_TELEGRAM_API_ID=
+PROD_TELEGRAM_API_HASH=
+PROD_TELEGRAM_PHONE=
+PROD_TWAPX_SOURCES=-1003663170785
+PROD_TWAPX_TARGET=-1003918218733:4
+PROD_TWAPX_ENABLED=true
+
+STAGE_TELEGRAM_API_ID=
+STAGE_TELEGRAM_API_HASH=
+STAGE_TELEGRAM_PHONE=
+STAGE_TWAPX_SOURCES=-1003918218733:2
+STAGE_TWAPX_TARGET=-1003918218733:4
+STAGE_TWAPX_ENABLED=true
+```
+
+Формат `TWAPX_SOURCES`: `chat_id[:thread_id],chat_id[:thread_id]`. Если thread/topic нет — указывай только `chat_id` без `:`.
+
+`TELEGRAM_SESSION_PATH=sessions/twap_user.session` можно оставить единым для обоих окружений. Если нужны разные session-файлы, заполни `PROD_TELEGRAM_SESSION_PATH` и `STAGE_TELEGRAM_SESSION_PATH`.
+
 ## 1. Главная команда: полный перезапуск после правок кода
 
 Используй этот сценарий, если менялись файлы проекта: `app/`, `Dockerfile`, `requirements.txt`, local UI, Signal Server, логика бирж, fallback, парсеры и т.д.
@@ -226,7 +248,7 @@ run.bat run --rm app python -m app.cli login
 1. Telegram пришлёт код.
 2. Введи код в консоль.
 3. Если включена 2FA, введи пароль.
-4. Сессия сохранится в `sessions/twap_user.session`.
+4. Сессия сохранится в `TELEGRAM_SESSION_PATH`, либо в `PROD_TELEGRAM_SESSION_PATH` / `STAGE_TELEGRAM_SESSION_PATH`, если они заданы.
 
 ### 5.5. Запустить всё приложение
 
@@ -262,6 +284,10 @@ run.bat stop app
 ```powershell
 Remove-Item -Force .\sessions\twap_user.session -ErrorAction SilentlyContinue
 Remove-Item -Force .\sessions\twap_user.session-journal -ErrorAction SilentlyContinue
+Remove-Item -Force .\sessions\twap_prod_user.session -ErrorAction SilentlyContinue
+Remove-Item -Force .\sessions\twap_prod_user.session-journal -ErrorAction SilentlyContinue
+Remove-Item -Force .\sessions\twap_stage_user.session -ErrorAction SilentlyContinue
+Remove-Item -Force .\sessions\twap_stage_user.session-journal -ErrorAction SilentlyContinue
 ```
 
 ### 6.3. Заново авторизоваться
@@ -375,6 +401,9 @@ LOCAL_UI_PORT=8080
 SIGNAL_SERVER_PORT=8090
 PHPMYADMIN_PORT=8081
 MYSQL_HOST_PORT=3306
+TELEGRAM_SESSION_PATH=sessions/twap_user.session
+TWAPX_SOURCES=...
+TWAPX_TARGET=...
 ```
 
 или:
@@ -386,6 +415,9 @@ LOCAL_UI_PORT=18080
 SIGNAL_SERVER_PORT=18090
 PHPMYADMIN_PORT=18081
 MYSQL_HOST_PORT=13306
+TELEGRAM_SESSION_PATH=sessions/twap_user.session
+TWAPX_SOURCES=...
+TWAPX_TARGET=...
 ```
 
 ## 11. Если мешают старые контейнеры `twap1`
