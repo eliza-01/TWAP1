@@ -23,6 +23,32 @@ class LocalTradeStore:
         trades = self._trades()
         return [trade for trade in trades if trade.get("status") == "open"]
 
+    def reset_signal_state_on_startup(self, started_at: str, clear_logs: bool = True) -> dict[str, Any]:
+        """Clear local per-run signal memory on software startup.
+
+        This deliberately keeps trade records, because old open trades are handled
+        separately by ignore_open_trades_on_startup(). The startup policy is that
+        old signals from previous local runs must not affect a new run.
+        """
+        data = self._read()
+        processed = data.get("processed_signals")
+        logs = data.get("logs")
+        processed_count = len(processed) if isinstance(processed, list) else 0
+        log_count = len(logs) if isinstance(logs, list) else 0
+
+        data["processed_signals"] = []
+        if clear_logs:
+            data["logs"] = []
+        data["signal_state_reset_at"] = started_at
+        data["signal_state_reset_reason"] = "software_started_fresh"
+        self._write(data)
+
+        return {
+            "processed_signals_cleared": processed_count,
+            "logs_cleared": log_count if clear_logs else 0,
+            "started_at": started_at,
+        }
+
     def add_log(
         self,
         level: str,

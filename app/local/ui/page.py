@@ -110,7 +110,7 @@ def render_page() -> str:
       <button class="secondary" onclick="loadFallbackReports()">Отчеты страховки</button>
     </div>
     <pre id="autoStatus" class="status"></pre>
-    <table><thead><tr><th>Время</th><th>Тип</th><th>Действие</th><th>Символ</th><th>Сообщение</th></tr></thead><tbody id="tradeLogs"></tbody></table>
+    <table><thead><tr><th>Время</th><th>Signal ID</th><th>Тип</th><th>Действие</th><th>Символ</th><th>Сообщение</th></tr></thead><tbody id="tradeLogs"></tbody></table>
     <table><thead><tr><th>Trade key</th><th>Символ</th><th>Сторона</th><th>Маржа</th><th>Объем USDT</th><th>Quantity</th><th>Плечо</th><th>TWAP deadline</th><th>Открыт</th><th>Order</th></tr></thead><tbody id="openTrades"></tbody></table>
     <table><thead><tr><th>ID</th><th>Время</th><th>Статус</th><th>Trade key</th><th>Символ</th><th>Сообщение</th></tr></thead><tbody id="fallbackReports"></tbody></table>
   </details>
@@ -411,7 +411,7 @@ async function checkSignalConnection() {
 }
 async function loadTradingLogs() {
   const data = await api('/api/trading/logs?limit=100');
-  $('tradeLogs').innerHTML = data.items.map(x => `<tr><td>${x.time || ''}</td><td><span class="pill ${x.level === 'success' ? 'ok' : (x.level === 'error' ? 'bad' : '')}">${esc(x.level || '')}</span></td><td>${esc(x.action || '')}</td><td>${esc(x.symbol || '')}</td><td>${esc(x.message || '')}</td></tr>`).join('');
+  $('tradeLogs').innerHTML = data.items.map(x => `<tr><td>${x.time || ''}</td><td>${x.signal_id || ''}</td><td><span class="pill ${x.level === 'success' ? 'ok' : (x.level === 'error' ? 'bad' : '')}">${esc(x.level || '')}</span></td><td>${esc(x.action || '')}</td><td>${esc(x.symbol || '')}</td><td>${esc(x.message || '')}</td></tr>`).join('');
 }
 async function loadOpenTrades() {
   const data = await api('/api/trading/open-trades');

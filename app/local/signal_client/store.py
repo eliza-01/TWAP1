@@ -21,6 +21,12 @@ class LocalSignalStore:
             return
         items.append(signal)
         self._write(items[-500:])
+
+    def clear(self) -> int:
+        items = self._read()
+        self._write([])
+        return len(items)
+
     def _read(self) -> list[dict[str, Any]]:
         if not self.path.exists():
             return []
@@ -47,3 +53,4 @@ class LocalSignalStore:
             tmp_path = Path(tmp.name)
 
         tmp_path.replace(self.path)
+

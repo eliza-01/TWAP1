@@ -47,3 +47,20 @@ def test_ignore_open_trades_on_startup_marks_only_open_trades(tmp_path):
     assert ignored["status"] == "ignored_on_startup"
     assert ignored["ignore_reason"] == "software_started_fresh"
     assert closed["status"] == "closed"
+
+
+
+def test_reset_signal_state_on_startup_clears_processed_signals_and_logs_but_keeps_trades(tmp_path):
+    store = LocalTradeStore(str(tmp_path / "trades.json"))
+    store.add_open_trade({"trade_key": "signal:1", "symbol": "ENAUSDT", "status": "open"})
+    store.mark_signal_processed(10)
+    store.mark_signal_processed(11)
+    store.add_log("info", "test", "old log", {"signal_id": 10, "asset": "ENA"})
+
+    summary = store.reset_signal_state_on_startup("2026-07-06T19:00:00+00:00")
+
+    assert summary["processed_signals_cleared"] == 2
+    assert summary["logs_cleared"] == 1
+    assert not store.is_signal_processed(10)
+    assert store.list_logs() == []
+    assert store.list_open_trades()[0]["trade_key"] == "signal:1"

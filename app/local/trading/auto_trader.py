@@ -48,9 +48,44 @@ class LocalAutoTrader:
         self._lock = asyncio.Lock()
         self._started_at = datetime.now(timezone.utc)
         self._startup_old_signal_log_written = False
+        self._duplicate_signal_log_ids: set[int] = set()
+
+    def reset_signal_runtime_state_on_startup(
+        self,
+        started_at: datetime | None = None,
+        local_recent_signals_cleared: int = 0,
+    ) -> dict[str, Any]:
+        startup_at = (started_at or self._started_at).astimezone(timezone.utc)
+        self._started_at = startup_at
+        self._startup_old_signal_log_written = False
+        self._duplicate_signal_log_ids.clear()
+        started_at_iso = startup_at.isoformat()
+
+        reset_method = getattr(self.trade_store, "reset_signal_state_on_startup", None)
+        reset_summary = (
+            reset_method(started_at_iso, clear_logs=True)
+            if callable(reset_method)
+            else {"processed_signals_cleared": 0, "logs_cleared": 0, "started_at": started_at_iso}
+        )
+        reset_summary["local_recent_signals_cleared"] = local_recent_signals_cleared
+
+        self.trade_store.add_log(
+            "warning",
+            "startup_signal_state_reset",
+            "Софт запущен с чистого листа: локальная память сигналов очищена, старые signal_id больше не влияют на новый запуск",
+            raw=reset_summary,
+        )
+        logger.warning(
+            "Startup fresh state: cleared local signal memory processed=%s recent=%s logs=%s",
+            reset_summary.get("processed_signals_cleared"),
+            local_recent_signals_cleared,
+            reset_summary.get("logs_cleared"),
+        )
+        return reset_summary
 
     def ignore_existing_open_trades_on_startup(self, started_at: datetime | None = None) -> int:
         startup_at = (started_at or self._started_at).astimezone(timezone.utc)
+        self._started_at = startup_at
         started_at_iso = startup_at.isoformat()
 
         ignore_method = getattr(self.trade_store, "ignore_open_trades_on_startup", None)
@@ -70,6 +105,18 @@ class LocalAutoTrader:
         logger.warning("Startup fresh state: ignored old open trades=%s", ignored_count)
         return ignored_count
 
+    def log_signal_skipped_before_startup(self, signal: dict[str, Any]) -> None:
+        signal_id = _signal_id(signal)
+        if self.trade_store.is_signal_processed(signal_id):
+            return
+        self.trade_store.mark_signal_processed(signal_id)
+        self.trade_store.add_log(
+            "info",
+            "skip_signal_before_startup",
+            "Сигнал получен, но создан до запуска local-клиента: старт с чистого листа, сделка не открыта",
+            signal,
+        )
+
     async def handle_signal(self, signal: dict[str, Any]) -> None:
         async with self._lock:
             await self._handle_signal_locked(signal)
@@ -82,11 +129,26 @@ class LocalAutoTrader:
         signal_id = _signal_id(signal)
 
         if self.trade_store.is_signal_processed(signal_id):
+            if signal_id and signal_id not in self._duplicate_signal_log_ids:
+                self._duplicate_signal_log_ids.add(signal_id)
+                self.trade_store.add_log(
+                    "info",
+                    "skip_duplicate_signal",
+                    "Повторный сигнал уже был обработан ранее, сделка повторно не открывается",
+                    signal,
+                )
             return
 
         settings = self.settings_store.load()
 
         if not settings.trading.auto_trading_enabled:
+            self.trade_store.mark_signal_processed(signal_id)
+            self.trade_store.add_log(
+                "warning",
+                "auto_trading_disabled",
+                "Сигнал получен, но автоторговля выключена в локальных настройках: сделка не открыта",
+                signal,
+            )
             return
 
         if _is_before_dt(signal, self._started_at):

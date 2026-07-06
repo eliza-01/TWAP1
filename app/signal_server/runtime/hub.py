@@ -69,16 +69,29 @@ class SignalHub:
             if isinstance(data, dict):
                 client_last_signal_id = max(int(data.get("last_signal_id") or 0), 0)
                 db_max_signal_id = await asyncio.to_thread(self.repository.max_signal_id)
+                self._clamp_last_signal_id(db_max_signal_id)
 
                 if _bool_value(data.get("fresh_start")):
                     fresh_start_after = data.get("fresh_start_after")
                     if fresh_start_after and hasattr(self.repository, "max_signal_id_before"):
-                        client_last_signal_id = max(
-                            client_last_signal_id,
-                            await asyncio.to_thread(self.repository.max_signal_id_before, fresh_start_after),
+                        fresh_start_after_id = await asyncio.to_thread(
+                            self.repository.max_signal_id_before,
+                            fresh_start_after,
                         )
                     else:
-                        client_last_signal_id = max(client_last_signal_id, db_max_signal_id)
+                        fresh_start_after_id = db_max_signal_id
+
+                    if client_last_signal_id > db_max_signal_id:
+                        logger.warning(
+                            "Signal WS client last_signal_id=%s is ahead of DB max=%s during fresh start; ignoring stored client id",
+                            client_last_signal_id,
+                            db_max_signal_id,
+                        )
+
+                    # Fresh start means: do not service anything created before local startup.
+                    # The persisted local last_signal_id may belong to another DB/stage/prod run,
+                    # so it must not be allowed to move the boundary beyond the startup time.
+                    client_last_signal_id = max(min(int(fresh_start_after_id or 0), db_max_signal_id), 0)
 
                     pending_max_id = await self._send_pending(websocket, client_last_signal_id)
                     self.last_signal_id = max(self.last_signal_id, pending_max_id, client_last_signal_id)
@@ -140,6 +153,9 @@ class SignalHub:
                     await self._sleep()
                     continue
 
+                db_max_signal_id = await asyncio.to_thread(self.repository.max_signal_id)
+                self._clamp_last_signal_id(db_max_signal_id)
+
                 signals = await asyncio.to_thread(self.repository.list_pending, self.last_signal_id, 100, True)
                 for signal in signals:
                     self.last_signal_id = max(self.last_signal_id, int(signal.get("signal_id") or 0))
@@ -147,6 +163,17 @@ class SignalHub:
             except Exception:
                 logger.exception("Signal hub broadcast loop failed")
             await self._sleep()
+
+    def _clamp_last_signal_id(self, db_max_signal_id: int) -> None:
+        db_max = max(int(db_max_signal_id or 0), 0)
+        if self.last_signal_id <= db_max:
+            return
+        logger.warning(
+            "Signal hub last_signal_id=%s is ahead of DB max=%s; clamping to DB max",
+            self.last_signal_id,
+            db_max,
+        )
+        self.last_signal_id = db_max
 
     async def _send_pending(self, websocket: WebSocket, after_id: int) -> int:
         max_id = after_id
@@ -225,3 +252,4 @@ def _bool_value(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "y", "on"}
     return bool(value)
+

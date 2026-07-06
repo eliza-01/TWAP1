@@ -47,7 +47,6 @@ class LocalSignalClient:
         self._check_lock = asyncio.Lock()
         self._started_at = datetime.now(timezone.utc)
         self._fresh_start_pending = True
-        self._startup_state_reset_done = False
         self._startup_old_signals_skipped = 0
 
     def start(self) -> None:
@@ -56,9 +55,7 @@ class LocalSignalClient:
             self._started_at = datetime.now(timezone.utc)
             self._fresh_start_pending = True
             self._startup_old_signals_skipped = 0
-            if self.auto_trader is not None and not self._startup_state_reset_done:
-                self.auto_trader.ignore_existing_open_trades_on_startup(self._started_at)
-                self._startup_state_reset_done = True
+            self._reset_local_signal_state_on_startup()
             self._task = asyncio.create_task(self._run())
         if self.auto_trader is not None and (self._fallback_task is None or self._fallback_task.done()):
             self._fallback_task = asyncio.create_task(self._run_fallback_watch())
@@ -119,6 +116,22 @@ class LocalSignalClient:
             return {**self.status(), "health_ok": False, "health_message": f"Сервер сигналов недоступен: {exc}"}
 
         return {**self.status(), "health_ok": True, "health_message": "HTTP /health OK", "health_response": data}
+
+    def _reset_local_signal_state_on_startup(self) -> None:
+        recent_cleared = self.signal_store.clear()
+        self.settings_store.update({"signals": {"last_signal_id": 0}})
+
+        if self.auto_trader is not None:
+            self.auto_trader.reset_signal_runtime_state_on_startup(
+                self._started_at,
+                local_recent_signals_cleared=recent_cleared,
+            )
+            self.auto_trader.ignore_existing_open_trades_on_startup(self._started_at)
+        else:
+            logger.warning(
+                "Startup fresh state: cleared local signal memory recent=%s and reset last_signal_id=0",
+                recent_cleared,
+            )
 
     async def _run(self) -> None:
         logger.info("Signal client runner started in WebSocket mode")
@@ -192,6 +205,9 @@ class LocalSignalClient:
 
         if _is_before_dt(signal, self._started_at):
             self._startup_old_signals_skipped += 1
+            self._last_signal_at = _now_iso()
+            if self.auto_trader is not None:
+                self.auto_trader.log_signal_skipped_before_startup(signal)
             if self._startup_old_signals_skipped == 1:
                 logger.info("Signal WS skips signals created before local startup")
             return
@@ -296,3 +312,4 @@ def _parse_dt(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
