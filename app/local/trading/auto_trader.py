@@ -46,6 +46,29 @@ class LocalAutoTrader:
         self.trade_store = trade_store
         self.fallback_reports = fallback_reports or FallbackCloseReportRepository()
         self._lock = asyncio.Lock()
+        self._started_at = datetime.now(timezone.utc)
+        self._startup_old_signal_log_written = False
+
+    def ignore_existing_open_trades_on_startup(self, started_at: datetime | None = None) -> int:
+        startup_at = (started_at or self._started_at).astimezone(timezone.utc)
+        started_at_iso = startup_at.isoformat()
+
+        ignore_method = getattr(self.trade_store, "ignore_open_trades_on_startup", None)
+        if not callable(ignore_method):
+            return 0
+
+        ignored_count = int(ignore_method(started_at_iso))
+        if ignored_count <= 0:
+            return 0
+
+        self.trade_store.add_log(
+            "warning",
+            "startup_fresh_state",
+            f"Софт запущен с чистого листа: старые open-сделки ({ignored_count}) помечены как ignored_on_startup и не будут обслуживаться страховкой.",
+            raw={"ignored_count": ignored_count, "started_at": started_at_iso},
+        )
+        logger.warning("Startup fresh state: ignored old open trades=%s", ignored_count)
+        return ignored_count
 
     async def handle_signal(self, signal: dict[str, Any]) -> None:
         async with self._lock:
@@ -64,6 +87,18 @@ class LocalAutoTrader:
         settings = self.settings_store.load()
 
         if not settings.trading.auto_trading_enabled:
+            return
+
+        if _is_before_dt(signal, self._started_at):
+            self.trade_store.mark_signal_processed(signal_id)
+            if not self._startup_old_signal_log_written:
+                self._startup_old_signal_log_written = True
+                self.trade_store.add_log(
+                    "info",
+                    "skip_signal_before_startup",
+                    "Сигналы, созданные до запуска софта, пропускаются: старт с чистого листа",
+                    signal,
+                )
             return
 
         if _is_before_enabled_at(signal, settings.trading.auto_trading_enabled_at):
@@ -503,21 +538,20 @@ def _is_before_enabled_at(signal: dict[str, Any], enabled_at: str) -> bool:
     if not enabled_at:
         return False
 
+    enabled_dt = _parse_dt(enabled_at)
+    if enabled_dt is None:
+        return False
+
+    return _is_before_dt(signal, enabled_dt)
+
+
+def _is_before_dt(signal: dict[str, Any], boundary: datetime) -> bool:
     signal_time = signal.get("created_at") or signal.get("message_date")
-    if not signal_time:
+    signal_dt = _parse_dt(signal_time)
+    if signal_dt is None:
         return False
 
-    try:
-        signal_dt = datetime.fromisoformat(str(signal_time).replace("Z", "+00:00"))
-        enabled_dt = datetime.fromisoformat(enabled_at.replace("Z", "+00:00"))
-    except ValueError:
-        return False
-
-    if signal_dt.tzinfo is None:
-        signal_dt = signal_dt.replace(tzinfo=timezone.utc)
-    if enabled_dt.tzinfo is None:
-        enabled_dt = enabled_dt.replace(tzinfo=timezone.utc)
-    return signal_dt < enabled_dt
+    return signal_dt < boundary.astimezone(timezone.utc)
 
 
 def _fallback_timing(signal: dict[str, Any], grace_seconds: float) -> dict[str, str | None]:
@@ -647,3 +681,4 @@ def _fmt(value: Any) -> str:
         return f"{float(value):.2f}"
     except (TypeError, ValueError):
         return "0.00"
+

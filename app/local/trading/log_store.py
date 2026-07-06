@@ -83,6 +83,24 @@ class LocalTradeStore:
         self._write(data)
         return trade
 
+    def ignore_open_trades_on_startup(self, started_at: str, reason: str = "software_started_fresh") -> int:
+        data = self._read()
+        trades = data.setdefault("trades", [])
+        ignored_count = 0
+
+        for trade in trades:
+            if not isinstance(trade, dict) or trade.get("status") != "open":
+                continue
+            trade["status"] = "ignored_on_startup"
+            trade["ignored_at"] = started_at
+            trade["ignore_reason"] = reason
+            ignored_count += 1
+
+        if ignored_count:
+            self._write(data)
+
+        return ignored_count
+
     def update_open_trade(self, trade_key: str, patch: dict[str, Any]) -> dict[str, Any] | None:
         data = self._read()
         trades = data.setdefault("trades", [])
@@ -249,3 +267,4 @@ def _int_or_none(value: Any) -> int | None:
         return int(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+

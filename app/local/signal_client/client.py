@@ -45,10 +45,20 @@ class LocalSignalClient:
         self._last_check_monotonic = 0.0
         self._last_check_result: dict[str, Any] | None = None
         self._check_lock = asyncio.Lock()
+        self._started_at = datetime.now(timezone.utc)
+        self._fresh_start_pending = True
+        self._startup_state_reset_done = False
+        self._startup_old_signals_skipped = 0
 
     def start(self) -> None:
         if self._task is None or self._task.done():
             self._stop = asyncio.Event()
+            self._started_at = datetime.now(timezone.utc)
+            self._fresh_start_pending = True
+            self._startup_old_signals_skipped = 0
+            if self.auto_trader is not None and not self._startup_state_reset_done:
+                self.auto_trader.ignore_existing_open_trades_on_startup(self._started_at)
+                self._startup_state_reset_done = True
             self._task = asyncio.create_task(self._run())
         if self.auto_trader is not None and (self._fallback_task is None or self._fallback_task.done()):
             self._fallback_task = asyncio.create_task(self._run_fallback_watch())
@@ -130,15 +140,14 @@ class LocalSignalClient:
                     self._set_state("connected", "WebSocket подключен")
                     self._connected_at = _now_iso()
                     logger.info("Signal WS connected")
-                    await ws.send(
-                        json.dumps(
-                            {
-                                "type": "hello",
-                                "last_signal_id": settings.signals.last_signal_id,
-                            },
-                            ensure_ascii=False,
-                        )
-                    )
+                    hello = {
+                        "type": "hello",
+                        "last_signal_id": settings.signals.last_signal_id,
+                    }
+                    if self._fresh_start_pending:
+                        hello["fresh_start"] = True
+                        hello["fresh_start_after"] = self._started_at.isoformat()
+                    await ws.send(json.dumps(hello, ensure_ascii=False))
                     async for raw in ws:
                         await self._handle_message(raw)
             except Exception as exc:
@@ -166,16 +175,30 @@ class LocalSignalClient:
             logger.debug("Signal WS ignored non-json message")
             return
 
-        if not isinstance(data, dict) or data.get("type") != "signal.created":
-            logger.debug("Signal WS ignored message: %s", data.get("type") if isinstance(data, dict) else type(data).__name__)
+        if not isinstance(data, dict):
+            logger.debug("Signal WS ignored non-dict message")
+            return
+
+        if data.get("type") == "hello.ack":
+            self._handle_hello_ack(data)
+            return
+
+        if data.get("type") != "signal.created":
+            logger.debug("Signal WS ignored message: %s", data.get("type"))
             return
 
         signal = data.get("signal") if isinstance(data.get("signal"), dict) else data
+        signal_id = self._remember_signal_id(signal)
+
+        if _is_before_dt(signal, self._started_at):
+            self._startup_old_signals_skipped += 1
+            if self._startup_old_signals_skipped == 1:
+                logger.info("Signal WS skips signals created before local startup")
+            return
+
         self.signal_store.add(signal)
         self._last_signal_at = _now_iso()
-        signal_id = int(signal.get("signal_id") or signal.get("id") or 0)
         if signal_id:
-            self.settings_store.update({"signals": {"last_signal_id": signal_id}})
             logger.info(
                 "Signal WS received: id=%s kind=%s status=%s symbol=%s",
                 signal_id,
@@ -186,6 +209,23 @@ class LocalSignalClient:
 
         if self.auto_trader is not None:
             await self.auto_trader.handle_signal(signal)
+
+    def _handle_hello_ack(self, data: dict[str, Any]) -> None:
+        self._fresh_start_pending = False
+        last_signal_id = _int_value(data.get("last_signal_id"))
+        if last_signal_id > 0:
+            self.settings_store.update({"signals": {"last_signal_id": last_signal_id}})
+        logger.info(
+            "Signal WS hello acknowledged: fresh_start=%s last_signal_id=%s",
+            bool(data.get("fresh_start")),
+            last_signal_id,
+        )
+
+    def _remember_signal_id(self, signal: dict[str, Any]) -> int:
+        signal_id = _int_value(signal.get("signal_id") or signal.get("id"))
+        if signal_id:
+            self.settings_store.update({"signals": {"last_signal_id": signal_id}})
+        return signal_id
 
     async def _sleep(self, seconds: float) -> None:
         try:
@@ -225,3 +265,34 @@ def _connect_ws(url: str, headers: dict[str, str]):
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+
+def _int_value(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _is_before_dt(signal: dict[str, Any], boundary: datetime) -> bool:
+    signal_time = signal.get("created_at") or signal.get("message_date")
+    signal_dt = _parse_dt(signal_time)
+    if signal_dt is None:
+        return False
+    return signal_dt < boundary.astimezone(timezone.utc)
+
+
+def _parse_dt(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)

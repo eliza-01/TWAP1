@@ -289,3 +289,52 @@ def test_fallback_does_not_close_when_disabled(monkeypatch, tmp_path) -> None:
 
     assert adapter.closed is None
     assert len(store.list_open_trades()) == 1
+
+
+
+def test_startup_fresh_state_ignores_old_open_trades_before_fallback(monkeypatch, tmp_path) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from app.local.trading import auto_trader as module
+    from app.local.trading.auto_trader import LocalAutoTrader
+    from app.local.trading.log_store import LocalTradeStore
+
+    class FakeCloseAdapter:
+        def __init__(self) -> None:
+            self.closed = None
+
+        async def close_position(self, request):
+            self.closed = request
+            raise AssertionError("old startup trades must not be closed by fallback")
+
+    settings = LocalSettings(
+        trading=LocalTradingSettings(
+            fallback_close_enabled=True,
+            fallback_close_grace_seconds=5,
+        )
+    )
+    store = LocalTradeStore(str(tmp_path / "trades.json"))
+    started_at = datetime.now(timezone.utc) - timedelta(minutes=2)
+    store.add_open_trade(
+        {
+            "trade_key": "signal:640",
+            "symbol": "ZECUSDT",
+            "direction": "long",
+            "volume": 1,
+            "duration_minutes": 1,
+            "twap_started_at": started_at.isoformat(),
+            "twap_deadline_at": (started_at + timedelta(minutes=1)).isoformat(),
+            "status": "open",
+        }
+    )
+    adapter = FakeCloseAdapter()
+    monkeypatch.setattr(module, "get_exchange", lambda *_args, **_kwargs: adapter)
+
+    trader = LocalAutoTrader(FakeSettingsStore(settings), store)
+    ignored = trader.ignore_existing_open_trades_on_startup(datetime.now(timezone.utc))
+    asyncio.run(trader.check_fallback_closures())
+
+    assert ignored == 1
+    assert adapter.closed is None
+    assert store.list_open_trades() == []
+    assert any(trade.get("status") == "ignored_on_startup" for trade in store._trades())

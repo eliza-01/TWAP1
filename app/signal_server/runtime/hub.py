@@ -69,15 +69,50 @@ class SignalHub:
             if isinstance(data, dict):
                 client_last_signal_id = max(int(data.get("last_signal_id") or 0), 0)
                 db_max_signal_id = await asyncio.to_thread(self.repository.max_signal_id)
-                if client_last_signal_id > db_max_signal_id:
-                    logger.warning(
-                        "Signal WS client last_signal_id=%s is ahead of DB max=%s; treating it as fresh storage",
-                        client_last_signal_id,
-                        db_max_signal_id,
+
+                if _bool_value(data.get("fresh_start")):
+                    fresh_start_after = data.get("fresh_start_after")
+                    if fresh_start_after and hasattr(self.repository, "max_signal_id_before"):
+                        client_last_signal_id = max(
+                            client_last_signal_id,
+                            await asyncio.to_thread(self.repository.max_signal_id_before, fresh_start_after),
+                        )
+                    else:
+                        client_last_signal_id = max(client_last_signal_id, db_max_signal_id)
+
+                    pending_max_id = await self._send_pending(websocket, client_last_signal_id)
+                    self.last_signal_id = max(self.last_signal_id, pending_max_id, client_last_signal_id)
+                    await websocket.send_json(
+                        {
+                            "type": "hello.ack",
+                            "fresh_start": True,
+                            "last_signal_id": self.last_signal_id,
+                            "pending_skipped": True,
+                        }
                     )
-                    client_last_signal_id = 0
-                pending_max_id = await self._send_pending(websocket, client_last_signal_id)
-                self.last_signal_id = max(self.last_signal_id, pending_max_id, client_last_signal_id)
+                    logger.info(
+                        "Signal WS fresh start: skipped old pending up to id=%s after=%s",
+                        client_last_signal_id,
+                        fresh_start_after or "n/a",
+                    )
+                else:
+                    if client_last_signal_id > db_max_signal_id:
+                        logger.warning(
+                            "Signal WS client last_signal_id=%s is ahead of DB max=%s; treating it as fresh storage",
+                            client_last_signal_id,
+                            db_max_signal_id,
+                        )
+                        client_last_signal_id = 0
+                    pending_max_id = await self._send_pending(websocket, client_last_signal_id)
+                    self.last_signal_id = max(self.last_signal_id, pending_max_id, client_last_signal_id)
+                    await websocket.send_json(
+                        {
+                            "type": "hello.ack",
+                            "fresh_start": False,
+                            "last_signal_id": self.last_signal_id,
+                            "pending_skipped": False,
+                        }
+                    )
         except (asyncio.TimeoutError, json.JSONDecodeError, ValueError):
             pass
         except WebSocketDisconnect:
@@ -183,3 +218,10 @@ def _env_int(name: str, default: int) -> int:
         return int((os.getenv(name) or "").strip() or default)
     except ValueError:
         return default
+
+
+
+def _bool_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
