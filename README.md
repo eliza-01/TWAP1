@@ -30,14 +30,83 @@ SCENARIOS.md
 
 ## Адреса
 
-После запуска доступны:
+После запуска адреса зависят от `STAGE` в `.env`.
+
+Prod (`STAGE=OFF`):
 
 ```text
+Публичный домен:  https://twaps.ru
 Локальный клиент: http://localhost:8080
 Signal Server:    http://localhost:8090
 WebSocket:        ws://localhost:8090/ws/signals
 phpMyAdmin:       http://localhost:8081
 ```
+
+Stage (`STAGE=ON`):
+
+```text
+Публичный домен:  https://beta.twaps.ru
+Локальный клиент: http://localhost:18080
+Signal Server:    http://localhost:18090
+WebSocket:        ws://localhost:18090/ws/signals
+phpMyAdmin:       http://localhost:18081
+```
+
+## Stage / prod запуск
+
+Переключение делается одной переменной в `.env`:
+
+```env
+STAGE=ON   # stage, beta.twaps.ru
+STAGE=OFF  # prod, twaps.ru
+```
+
+Порты задаются парами `PROD_*` и `STAGE_*` в `.env.example`. Скрипт запуска читает `STAGE`, генерирует `.env.runtime` и `.env.compose.generated`, затем запускает Docker Compose с нужными портами.
+
+Windows:
+
+```bat
+run.bat --profile server --profile local up -d --build
+```
+
+Linux/macOS:
+
+```bash
+./run.sh --profile server --profile local up -d --build
+```
+
+Или напрямую через Python:
+
+```bash
+python tools/compose.py --profile server --profile local up -d --build
+```
+
+Если запустить `docker compose up` напрямую без `tools/compose.py`, Docker Compose не сможет сам сделать if/else по `STAGE`, поэтому будут использованы fallback-порты из `docker-compose.yml`.
+
+## Cloudflare Tunnel
+
+Прокидывать наружу нужно только HTTP-сервисы. MySQL наружу через Cloudflare лучше не отдавать.
+
+Prod (`STAGE=OFF`):
+
+```text
+twaps.ru      -> http://localhost:8080   # UI
+/ws/signals   -> http://localhost:8090   # WebSocket Signal Server
+/signals/*    -> http://localhost:8090   # HTTP pending signals
+/health       -> http://localhost:8090   # health check
+```
+
+Stage (`STAGE=ON`):
+
+```text
+beta.twaps.ru -> http://localhost:18080  # UI
+/ws/signals   -> http://localhost:18090  # WebSocket Signal Server
+/signals/*    -> http://localhost:18090  # HTTP pending signals
+/health       -> http://localhost:18090  # health check
+```
+
+phpMyAdmin лучше не публиковать. Если всё же нужно временно открыть — prod `8081`, stage `18081`, желательно закрыть Cloudflare Access.
+
 
 ## Основные файлы и папки
 
@@ -339,3 +408,4 @@ app/exchanges/<exchange>/
 ```text
 app/exchanges/registry.py
 ```
+

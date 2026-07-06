@@ -1,8 +1,14 @@
 services:
   app:
     build: .
-    container_name: twap_parser_app
+    container_name: ${COMPOSE_PROJECT_NAME:-twap_prod}_parser_app
     env_file: .env
+    environment:
+      APP_ENV: ${APP_ENV:-prod}
+      STAGE: ${STAGE:-OFF}
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-twaps.ru}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://twaps.ru}
+      PUBLIC_SIGNAL_WS_URL: ${PUBLIC_SIGNAL_WS_URL:-wss://twaps.ru/ws/signals}
     depends_on:
       mysql:
         condition: service_healthy
@@ -13,8 +19,14 @@ services:
 
   signal-server:
     build: .
-    container_name: twap_signal_server
+    container_name: ${COMPOSE_PROJECT_NAME:-twap_prod}_signal_server
     env_file: .env
+    environment:
+      APP_ENV: ${APP_ENV:-prod}
+      STAGE: ${STAGE:-OFF}
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-twaps.ru}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://twaps.ru}
+      PUBLIC_SIGNAL_WS_URL: ${PUBLIC_SIGNAL_WS_URL:-wss://twaps.ru/ws/signals}
     depends_on:
       mysql:
         condition: service_healthy
@@ -26,8 +38,14 @@ services:
 
   local:
     build: .
-    container_name: twap_local_client
+    container_name: ${COMPOSE_PROJECT_NAME:-twap_prod}_local_client
     env_file: .env
+    environment:
+      APP_ENV: ${APP_ENV:-prod}
+      STAGE: ${STAGE:-OFF}
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-twaps.ru}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://twaps.ru}
+      PUBLIC_SIGNAL_WS_URL: ${PUBLIC_SIGNAL_WS_URL:-wss://twaps.ru/ws/signals}
     depends_on:
       mysql:
         condition: service_healthy
@@ -41,7 +59,7 @@ services:
 
   mysql:
     image: mysql:8.4
-    container_name: twap_parser_mysql
+    container_name: ${COMPOSE_PROJECT_NAME:-twap_prod}_mysql
     env_file: .env
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -49,7 +67,7 @@ services:
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
-      - "${MYSQL_PORT}:3306"
+      - "${MYSQL_HOST_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -61,14 +79,14 @@ services:
 
   phpmyadmin:
     image: phpmyadmin:latest
-    container_name: twap_parser_phpmyadmin
+    container_name: ${COMPOSE_PROJECT_NAME:-twap_prod}_phpmyadmin
     env_file: .env
     environment:
       PMA_HOST: mysql
       PMA_PORT: 3306
       UPLOAD_LIMIT: 128M
     ports:
-      - "${PHPMYADMIN_PORT}:80"
+      - "${PHPMYADMIN_PORT:-8081}:80"
     depends_on:
       mysql:
         condition: service_healthy
@@ -76,3 +94,4 @@ services:
 
 volumes:
   mysql_data:
+

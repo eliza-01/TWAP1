@@ -1,151 +1,225 @@
 # Сценарии запуска и перезапуска
 
-Этот файл содержит только практические команды.
+Этот файл содержит только практические команды для текущей схемы `stage/prod`.
 
 Работать из корня проекта:
 
+```powershell
 cd C:\Projects\TWAP1
+```
 
+Важно: после разделения `stage/prod` **не используй обычный `docker compose ...` для запуска проекта**. Запускай через `run.bat`, потому что он читает `STAGE` из `.env`, генерирует `.env.compose.generated` и только потом запускает Docker Compose с правильными портами и именем проекта.
 
+```powershell
+run.bat ...
+```
 
-### 5.3. Остановить всё приложение без удаления данных
+Альтернатива без bat:
 
-docker compose --profile local --profile server down
+```powershell
+python tools\compose.py ...
+```
 
-Данные не удаляются.
+## 0. Как выбрать prod или stage
 
-## 1. Перезапуск после правок кода
+В `.env`:
 
-Используй этот сценарий, если менялись файлы проекта: `app/`, `tests/`, `Dockerfile`, `requirements.txt`, frontend/local UI, Signal Server и т.д.
+```env
+STAGE=OFF
+```
 
-### 1.1. Если менялся основной Telegram-слушатель
+Это prod:
 
-docker compose build app
-docker compose up -d --force-recreate app
+```text
+twaps.ru
+UI:            8080
+Signal Server: 8090
+phpMyAdmin:    8081
+MySQL host:    3306
+Compose name:  twap_prod
+```
 
+В `.env`:
 
-### 1.2. Если менялся локальный клиент
+```env
+STAGE=ON
+```
 
-docker compose --profile local build local
-docker compose --profile local up -d --force-recreate local
+Это stage:
 
+```text
+beta.twaps.ru
+UI:            18080
+Signal Server: 18090
+phpMyAdmin:    18081
+MySQL host:    13306
+Compose name:  twap_stage
+```
 
-### 1.3. Если менялся Signal Server
+## 1. Главная команда: полный перезапуск после правок кода
 
-docker compose --profile server build signal-server
-docker compose --profile server up -d --force-recreate signal-server
+Используй этот сценарий, если менялись файлы проекта: `app/`, `Dockerfile`, `requirements.txt`, local UI, Signal Server, логика бирж, fallback, парсеры и т.д.
 
+### 1.1. Полностью пересобрать и перезапустить всё приложение
 
-### 1.4. Если менялось сразу несколько частей проекта !!!!!!!!!!!!!!!
+```powershell
+run.bat --profile local --profile server down
+run.bat --profile local --profile server up -d --build --force-recreate
+```
 
-docker compose --profile local --profile server build
-docker compose --profile local --profile server up -d --force-recreate
+Данные не удаляются:
 
+* база MySQL остаётся в Docker volume;
+* Telegram-сессия остаётся в `sessions/`;
+* локальные настройки остаются в `local_data/`.
 
-### 1.5. Если обычная пересборка не помогла
+После запуска должны быть контейнеры:
+
+```text
+twap_prod_mysql / twap_stage_mysql
+twap_prod_phpmyadmin / twap_stage_phpmyadmin
+twap_prod_parser_app / twap_stage_parser_app
+twap_prod_local_client / twap_stage_local_client
+twap_prod_signal_server / twap_stage_signal_server
+```
+
+### 1.2. Если обычная пересборка не помогла
 
 Полная пересборка без Docker-кэша. Это дольше, но надёжнее, если Docker подтягивает старые слои.
 
-docker compose --profile local --profile server build --no-cache
-docker compose --profile local --profile server up -d --force-recreate
-
+```powershell
+run.bat --profile local --profile server down
+run.bat --profile local --profile server build --no-cache
+run.bat --profile local --profile server up -d --force-recreate
+```
 
 ## 2. Перезапуск без правок кода
 
 Используй этот сценарий, если код не менялся.
 
+### 2.1. Просто перезапустить всё приложение
+
+```powershell
+run.bat --profile local --profile server restart
+```
+
+### 2.2. Поднять приложение после остановки ПК или Docker Desktop
+
+```powershell
+run.bat --profile local --profile server up -d
+```
+
+### 2.3. Полностью остановить и заново поднять всё без удаления данных
+
+```powershell
+run.bat --profile local --profile server down
+run.bat --profile local --profile server up -d
+```
+
+## 3. Применить изменения `.env`
+
 Важно:
 
-* `restart` подходит только для обычного перезапуска уже созданного контейнера;
 * `restart` не применяет изменения `.env`;
-* для применения `.env` нужен `up -d --force-recreate`.
+* для применения `.env` нужен `up -d --force-recreate`;
+* `run.bat` каждый раз заново генерирует `.env.compose.generated` из текущего `.env`.
 
-### 2.1. Просто перезапустить Telegram-слушатель
+### 3.1. Применить `.env` для всего приложения
 
-docker compose restart app
+```powershell
+run.bat --profile local --profile server up -d --force-recreate
+```
 
+### 3.2. Применить `.env` после смены `STAGE=ON/OFF`
 
-### 2.2. Просто перезапустить локальный клиент
+На разных машинах просто выставь нужное значение в `.env` и запусти:
 
-docker compose --profile local restart local
+```powershell
+run.bat --profile local --profile server up -d --build --force-recreate
+```
 
+Если переключаешь `STAGE` на одной и той же машине и хочешь остановить старое окружение:
 
-### 2.3. Просто перезапустить Signal Server
+```powershell
+run.bat --profile local --profile server down
+```
 
-docker compose --profile server restart signal-server
+Потом поменяй `STAGE` в `.env` и подними новое окружение:
 
+```powershell
+run.bat --profile local --profile server up -d --build --force-recreate
+```
 
-### 2.4. Просто перезапустить всё приложение
+## 4. Перезапуск отдельных частей после правок
 
-docker compose --profile local --profile server restart
+### 4.1. Если менялся основной Telegram-слушатель
 
+```powershell
+run.bat build app
+run.bat up -d --force-recreate app
+```
 
-### 2.5. Применить изменения `.env`
+### 4.2. Если менялся локальный клиент
 
-Если менялся `.env`, код пересобирать не нужно, но контейнеры нужно пересоздать.
+```powershell
+run.bat --profile local build local
+run.bat --profile local up -d --force-recreate local
+```
 
-Для Telegram-слушателя:
+### 4.3. Если менялся Signal Server
 
-docker compose up -d --force-recreate app
+```powershell
+run.bat --profile server build signal-server
+run.bat --profile server up -d --force-recreate signal-server
+```
 
+### 4.4. Если менялось сразу несколько частей проекта
 
-Для локального клиента:
+```powershell
+run.bat --profile local --profile server up -d --build --force-recreate
+```
 
-docker compose --profile local up -d --force-recreate local
-
-
-Для Signal Server:
-
-docker compose --profile server up -d --force-recreate signal-server
-
-
-Для всего приложения:
-
-docker compose --profile local --profile server up -d --force-recreate
-
-
-### 2.6. Поднять приложение после остановки ПК или Docker Desktop
-
-docker compose --profile local --profile server up -d
-
-
-### 2.7. Полностью остановить и заново поднять всё без удаления данных
-
-docker compose --profile local --profile server down
-docker compose --profile local --profile server up -d
-
-
-Данные сохранятся:
-
-* Telegram-сессия останется в `sessions/`;
-* локальные настройки останутся в `local_data/`;
-* база данных останется в Docker volume.
-
-## 3. Запуск проекта впервые на ПК
+## 5. Запуск проекта впервые на ПК
 
 Используй этот сценарий на новом компьютере или после свежего клона проекта.
 
-### 3.1. Создать `.env`
+### 5.1. Создать `.env`
 
+```powershell
 Copy-Item .env.example .env
-
+```
 
 Открой `.env` и заполни нужные значения.
 
-### 3.2. Собрать проект
+Для prod:
 
-docker compose --profile local --profile server build
+```env
+STAGE=OFF
+```
 
+Для stage:
 
-### 3.3. Запустить MySQL и phpMyAdmin
+```env
+STAGE=ON
+```
 
-docker compose up -d mysql phpmyadmin
+### 5.2. Собрать проект
 
+```powershell
+run.bat --profile local --profile server build
+```
 
-### 3.4. Авторизовать Telegram-пользователя
+### 5.3. Запустить MySQL и phpMyAdmin
 
-docker compose run --rm app python -m app.cli login
+```powershell
+run.bat up -d mysql phpmyadmin
+```
 
+### 5.4. Авторизовать Telegram-пользователя
+
+```powershell
+run.bat run --rm app python -m app.cli login
+```
 
 После команды:
 
@@ -154,87 +228,11 @@ docker compose run --rm app python -m app.cli login
 3. Если включена 2FA, введи пароль.
 4. Сессия сохранится в `sessions/twap_user.session`.
 
-### 3.5. Запустить основной слушатель
+### 5.5. Запустить всё приложение
 
-docker compose up -d app
-
-
-### 3.6. Запустить локальный клиент
-
-docker compose --profile local up -d local
-
-
-### 3.7. Запустить Signal Server
-
-docker compose --profile server up -d signal-server
-
-
-## 4. Обновление Telegram-сессии
-
-Используй этот сценарий, если нужно:
-
-* авторизовать другого Telegram-пользователя;
-* сменить номер Telegram;
-* пересоздать сломанную сессию;
-* заново пройти логин Telethon.
-
-### 4.1. Остановить Telegram-слушатель
-
-docker compose stop app
-
-
-### 4.2. Удалить старую сессию
-
-Remove-Item -Force .\sessions\twap_user.session -ErrorAction SilentlyContinue
-Remove-Item -Force .\sessions\twap_user.session-journal -ErrorAction SilentlyContinue
-
-
-### 4.3. Заново авторизоваться
-
-docker compose run --rm app python -m app.cli login
-
-
-### 4.4. Запустить Telegram-слушатель
-
-docker compose up -d --force-recreate app
-
-
-## 5. Всё остальное
-
-### 5.1. Создать новую Telegram-сессию, не удаляя старую
-
-Если нужно оставить старую сессию, укажи новый файл сессии.
-
-В `.env`:
-
-env
-TELEGRAM_PHONE=+НОВЫЙ_НОМЕР
-TELEGRAM_SESSION_PATH=sessions/twap_user_2.session
-
-
-Потом:
-
-docker compose stop app
-docker compose run --rm app python -m app.cli login
-docker compose up -d --force-recreate app
-
-
-Старая сессия останется здесь:
-
-text
-sessions/twap_user.session
-
-
-Новая сессия будет здесь:
-
-text
-sessions/twap_user_2.session
-
-
-### 5.2. Запустить всё приложение одной командой
-
-docker compose --profile local --profile server up -d
-
+```powershell
+run.bat --profile local --profile server up -d
+```
 
 Поднимутся:
 
@@ -244,12 +242,57 @@ docker compose --profile local --profile server up -d
 * `local`;
 * `signal-server`.
 
-### 5.4. Остановить всё приложение с удалением базы данных
+## 6. Обновление Telegram-сессии
+
+Используй этот сценарий, если нужно:
+
+* авторизовать другого Telegram-пользователя;
+* сменить номер Telegram;
+* пересоздать сломанную сессию;
+* заново пройти логин Telethon.
+
+### 6.1. Остановить Telegram-слушатель
+
+```powershell
+run.bat stop app
+```
+
+### 6.2. Удалить старую сессию
+
+```powershell
+Remove-Item -Force .\sessions\twap_user.session -ErrorAction SilentlyContinue
+Remove-Item -Force .\sessions\twap_user.session-journal -ErrorAction SilentlyContinue
+```
+
+### 6.3. Заново авторизоваться
+
+```powershell
+run.bat run --rm app python -m app.cli login
+```
+
+### 6.4. Запустить Telegram-слушатель
+
+```powershell
+run.bat up -d --force-recreate app
+```
+
+## 7. Остановить приложение
+
+### 7.1. Остановить всё приложение без удаления данных
+
+```powershell
+run.bat --profile local --profile server down
+```
+
+Данные не удаляются.
+
+### 7.2. Остановить всё приложение с удалением базы данных
 
 Внимание: команда удалит MySQL volume и все данные в БД.
 
-docker compose --profile local --profile server down -v
-
+```powershell
+run.bat --profile local --profile server down -v
+```
 
 Не удалятся автоматически:
 
@@ -257,80 +300,135 @@ docker compose --profile local --profile server down -v
 * `sessions/`;
 * `local_data/`.
 
-### 5.5. Полностью начать с чистой БД, но оставить Telegram-сессию
+## 8. Запуск отдельных сервисов
 
-docker compose --profile local --profile server down -v
-docker compose up -d mysql phpmyadmin
-docker compose up -d app
-docker compose --profile local up -d local
-docker compose --profile server up -d signal-server
+### 8.1. Запустить только базу и phpMyAdmin
 
+```powershell
+run.bat up -d mysql phpmyadmin
+```
 
-### 5.6. Полностью начать с чистой БД и новой Telegram-сессией
+### 8.2. Запустить только Telegram-слушатель
 
-docker compose --profile local --profile server down -v
-Remove-Item -Force .\sessions\twap_user.session -ErrorAction SilentlyContinue
-Remove-Item -Force .\sessions\twap_user.session-journal -ErrorAction SilentlyContinue
-docker compose up -d mysql phpmyadmin
-docker compose run --rm app python -m app.cli login
-docker compose up -d app
-docker compose --profile local up -d local
-docker compose --profile server up -d signal-server
+```powershell
+run.bat up -d app
+```
 
+### 8.3. Запустить только локальный клиент
 
-### 5.7. Запустить только базу и phpMyAdmin
+```powershell
+run.bat --profile local up -d local
+```
 
-docker compose up -d mysql phpmyadmin
+### 8.4. Запустить только Signal Server
 
+```powershell
+run.bat --profile server up -d signal-server
+```
 
-### 5.8. Запустить только Telegram-слушатель
+## 9. Логи
 
-docker compose up -d app
+### 9.1. Посмотреть логи Telegram-слушателя
 
+```powershell
+run.bat logs -f app
+```
 
-### 5.9. Запустить только локальный клиент
+### 9.2. Посмотреть логи локального клиента
 
-docker compose --profile local up -d local
+```powershell
+run.bat --profile local logs -f local
+```
 
+### 9.3. Посмотреть логи Signal Server
 
-### 5.10. Запустить только Signal Server
+```powershell
+run.bat --profile server logs -f signal-server
+```
 
-docker compose --profile server up -d signal-server
+### 9.4. Посмотреть логи всего приложения
 
+```powershell
+run.bat --profile local --profile server logs -f
+```
 
-### 5.11. Применить `.env` для конкретного сервиса
+## 10. Проверить контейнеры и порты
 
-Для Telegram-слушателя:
+### 10.1. Список контейнеров текущего окружения
 
-docker compose up -d --force-recreate app
+```powershell
+run.bat --profile local --profile server ps
+```
 
+### 10.2. Проверить сгенерированные порты
 
-Для локального клиента:
+```powershell
+Get-Content .env.compose.generated
+```
 
-docker compose --profile local up -d --force-recreate local
+Ищи строки:
 
+```env
+APP_ENV=prod
+PUBLIC_DOMAIN=twaps.ru
+LOCAL_UI_PORT=8080
+SIGNAL_SERVER_PORT=8090
+PHPMYADMIN_PORT=8081
+MYSQL_HOST_PORT=3306
+```
 
-Для Signal Server:
+или:
 
-docker compose --profile server up -d --force-recreate signal-server
+```env
+APP_ENV=stage
+PUBLIC_DOMAIN=beta.twaps.ru
+LOCAL_UI_PORT=18080
+SIGNAL_SERVER_PORT=18090
+PHPMYADMIN_PORT=18081
+MYSQL_HOST_PORT=13306
+```
 
+## 11. Если мешают старые контейнеры `twap1`
 
-Для всего приложения:
+Если раньше проект запускался старым способом и в Docker Desktop осталась группа `twap1`, она может занимать порты `8080`, `8090`, `8081`, `3306`.
 
-docker compose --profile local --profile server up -d --force-recreate
+Остановить старый проект:
 
+```powershell
+docker compose -p twap1 down
+```
 
-### 5.12. Посмотреть логи Telegram-слушателя
+Потом поднять текущий проект:
 
-docker compose logs -f app
+```powershell
+run.bat --profile local --profile server up -d --build --force-recreate
+```
 
+## 12. Cloudflare ports
 
-### 5.13. Посмотреть логи локального клиента
+Prod, если `STAGE=OFF`:
 
-docker compose --profile local logs -f local
+```text
+twaps.ru             -> http://localhost:8080
+/twap UI             -> localhost:8080
+/ws/signals          -> http://localhost:8090
+/health              -> http://localhost:8090
+/signals             -> http://localhost:8090
+```
 
+Stage, если `STAGE=ON`:
 
-### 5.14. Посмотреть логи Signal Server
+```text
+beta.twaps.ru        -> http://localhost:18080
+/twap UI             -> localhost:18080
+/ws/signals          -> http://localhost:18090
+/health              -> http://localhost:18090
+/signals             -> http://localhost:18090
+```
 
-docker compose --profile server logs -f signal-server
+`phpMyAdmin` наружу лучше не публиковать. Если временно нужно, используй Cloudflare Access:
 
+```text
+prod:  localhost:8081
+stage: localhost:18081
+```
