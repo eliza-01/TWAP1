@@ -10,6 +10,7 @@ class LocalExchangeSettings:
     enabled: bool = False
     api_key: str = ""
     secret_key: str = ""
+    hedge_mode_enabled: bool = True
 
 
 @dataclass
@@ -65,6 +66,7 @@ def settings_from_dict(data: dict[str, Any]) -> LocalSettings:
             enabled=bool(raw.get("enabled", False)),
             api_key=str(raw.get("api_key") or ""),
             secret_key=str(raw.get("secret_key") or ""),
+            hedge_mode_enabled=_bool_value(raw.get("hedge_mode_enabled"), True),
         )
 
     if "binance" not in exchanges:
@@ -155,3 +157,4 @@ def _positive_int(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0 else default
+

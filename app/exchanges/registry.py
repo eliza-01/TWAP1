@@ -29,5 +29,7 @@ def get_exchange(settings: LocalSettings, name: str | None = None) -> ExchangeAd
             api_key=raw.api_key if raw else "",
             secret_key=raw.secret_key if raw else "",
         ),
+        hedge_mode_enabled=bool(raw.hedge_mode_enabled) if raw else True,
     )
     return cls(config)
+

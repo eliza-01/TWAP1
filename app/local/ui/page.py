@@ -28,7 +28,9 @@ def render_page() -> str:
       <div><label>Binance API key</label><input id="binanceApiKey" placeholder="API key" type="password" /></div>
       <div><label>Binance Secret key</label><input id="binanceSecretKey" placeholder="Secret key" type="password" /></div>
       <div><label>Включить Binance</label><select id="binanceEnabled"><option value="true">Да</option><option value="false">Нет</option></select></div>
+      <div><label>Binance режим позиций</label><select id="binanceHedgeMode"><option value="true">Hedge Mode: Long и Short отдельно</option><option value="false">One-way Mode: Long закрывает Short</option></select></div>
     </div>
+    <p class="muted">По умолчанию выбран Hedge Mode. Перед открытием сделки софт синхронизирует режим на Binance; переключение невозможно, если на аккаунте есть открытые позиции или ордера.</p>
     <div class="row" style="margin-top:10px">
       <button onclick="saveSettings()">Сохранить настройки</button>
       <button class="secondary" onclick="checkStatus()">Проверить подключение</button>
@@ -166,6 +168,7 @@ async function init() {
   };
   const settings = await api('/api/settings');
   $('binanceEnabled').value = String(settings.exchanges?.binance?.enabled || false);
+  $('binanceHedgeMode').value = String(settings.exchanges?.binance?.hedge_mode_enabled ?? true);
   $('amountUsdt').value = settings.trading?.default_volume || 10;
   $('leverage').value = settings.trading?.default_leverage || 1;
   $('direction').value = settings.trading?.default_direction || 'long';
@@ -212,7 +215,7 @@ async function saveSettings() {
   applyMinVolumeFlag();
   const patch = {
     selected_exchange: selected,
-    exchanges: { binance: { enabled: $('binanceEnabled').value === 'true' } },
+    exchanges: { binance: { enabled: $('binanceEnabled').value === 'true', hedge_mode_enabled: $('binanceHedgeMode').value === 'true' } },
     trading: {
       default_volume: Number($('amountUsdt').value || 10),
       default_leverage: $('useMinVolume').value === 'true' ? 1 : Number($('autoLeverage').value || $('leverage').value),
@@ -422,3 +425,4 @@ init();
 </script>
 </body>
 </html>"""
+

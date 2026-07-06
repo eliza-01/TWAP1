@@ -48,7 +48,17 @@ class BinanceAdapter(ExchangeAdapter):
         try:
             await self.client.public_get(BOOK_TICKER, {"symbol": "BTCUSDT"})
             await self.client.signed_get(ACCOUNT_BALANCE)
-            return ConnectionStatus("connected", "Подключение к Binance Futures активно")
+            actual_hedge_mode = await self._hedge_mode()
+            desired_hedge_mode = bool(self.config.hedge_mode_enabled)
+            actual_title = _position_mode_title(actual_hedge_mode)
+            desired_title = _position_mode_title(desired_hedge_mode)
+            if actual_hedge_mode != desired_hedge_mode:
+                return ConnectionStatus(
+                    "connected",
+                    f"Подключение к Binance Futures активно. Сейчас на Binance: {actual_title}; в настройке выбран: {desired_title}. "
+                    "Режим будет переключен перед открытием сделки, если нет открытых позиций и ордеров.",
+                )
+            return ConnectionStatus("connected", f"Подключение к Binance Futures активно. Режим позиций: {actual_title}")
         except Exception as exc:
             return ConnectionStatus("error", str(exc))
 
@@ -161,8 +171,8 @@ class BinanceAdapter(ExchangeAdapter):
         ticker = await self.client.public_get(BOOK_TICKER, {"symbol": symbol})
         raw_price = _ticker_price(ticker, _trade_price_side(request.direction, is_close=False))
         volume = _order_volume(request.volume, request.amount_usdt, request.notional_rounding, contract, symbol, raw_price)
+        hedge_mode = await self._ensure_position_mode_for_open()
         leverage = await self._prepare_symbol(symbol, request.leverage)
-        hedge_mode = await self._hedge_mode()
 
         payload: dict[str, Any] = {
             "symbol": symbol,
@@ -239,6 +249,29 @@ class BinanceAdapter(ExchangeAdapter):
             raise ExchangeRequestError("Binance не вернула режим позиций")
         return bool(data.get("dualSidePosition"))
 
+    async def _ensure_position_mode_for_open(self) -> bool:
+        desired = bool(self.config.hedge_mode_enabled)
+        actual = await self._hedge_mode()
+        if actual == desired:
+            return actual
+
+        target = _position_mode_title(desired)
+        try:
+            await self.client.signed_post(
+                POSITION_MODE,
+                {"dualSidePosition": "true" if desired else "false"},
+            )
+        except BinanceApiError as exc:
+            if exc.code == -4059:
+                return desired
+            if exc.code in {-4067, -4068}:
+                raise ExchangeRequestError(
+                    f"Binance не дала переключить режим позиций на {target}: сначала отмените открытые ордера и закройте открытые позиции."
+                ) from exc
+            raise ExchangeRequestError(f"Binance не дала переключить режим позиций на {target}: {exc}") from exc
+
+        return desired
+
     async def _prepare_symbol(self, symbol: str, leverage: int) -> int:
         contract = await self._symbol_info(symbol)
         bracket = await self._leverage_bracket(symbol)
@@ -261,6 +294,10 @@ class BinanceAdapter(ExchangeAdapter):
             raise ExchangeDisabledError("Binance отключена")
         if not self.config.credentials.api_key or not self.config.credentials.secret_key:
             raise ExchangeNotConfiguredError("Не указаны Binance API key и Secret key")
+
+
+def _position_mode_title(hedge_mode: bool) -> str:
+    return "Hedge Mode" if hedge_mode else "One-way Mode"
 
 
 def _list(value: Any) -> list[dict[str, Any]]:
@@ -495,3 +532,4 @@ def _min_notional(min_volume: float, contract_size: float | None, price: float |
 
 def _not_none(value: float | None) -> float:
     return value if value is not None else 0.0
+
