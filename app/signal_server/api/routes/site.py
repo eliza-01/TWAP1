@@ -255,6 +255,7 @@ async def cabinet_page() -> str:
         </section>
 
         <script>
+        window.TWAP_SKIP_AUTH_REFRESH = true;
         const token = localStorage.getItem('twap_session_token') || '';
         if (!token) location.href = '/login';
 
@@ -263,8 +264,10 @@ async def cabinet_page() -> str:
             ...opts,
             headers: {'content-type': 'application/json', 'authorization': 'Bearer ' + token, ...(opts.headers || {})}
           });
-          const data = await res.json();
+          const data = await res.json().catch(() => ({}));
+          if (res.status === 401) clearSessionToken();
           if (!res.ok || data.success === false) throw new Error(data.detail || data.message || res.statusText);
+          setAuthState(true);
           return data;
         }
 
@@ -283,6 +286,9 @@ async def cabinet_page() -> str:
             showMessage(out, 'Данные обновлены.', 'success');
           } catch (e) {
             showMessage(out, e.message, 'error');
+            if (!localStorage.getItem('twap_session_token')) {
+              setTimeout(() => location.href = '/login', 900);
+            }
           }
         }
 
@@ -302,7 +308,7 @@ async def cabinet_page() -> str:
 
         async function logout() {
           try { await api('/api/auth/logout', {method: 'POST'}); } catch (e) {}
-          localStorage.removeItem('twap_session_token');
+          clearSessionToken();
           location.href = '/login';
         }
 
@@ -381,8 +387,11 @@ def _layout(title: str, body: str) -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{title}</title>
   <script>
-    try {{ document.documentElement.classList.add(localStorage.getItem('twap_session_token') ? 'is-auth' : 'is-guest'); }}
-    catch (e) {{ document.documentElement.classList.add('is-guest'); }}
+    try {{
+      document.documentElement.classList.add(localStorage.getItem('twap_session_token') ? 'auth-checking' : 'is-guest');
+    }} catch (e) {{
+      document.documentElement.classList.add('is-guest');
+    }}
   </script>
   <style>
     :root {{
@@ -418,8 +427,11 @@ def _layout(title: str, body: str) -> str:
     .nav-links {{ display: flex; align-items: center; gap: 10px; }}
     .nav-links a {{ color: var(--muted); text-decoration: none; font-weight: 700; padding: 10px 12px; border-radius: 999px; }}
     .nav-links a:hover {{ color: var(--text); background: rgba(255,255,255,.06); }}
-    .user-icon {{ width: 42px; height: 42px; display: grid; place-items: center; border-radius: 999px; border: 1px solid var(--border); background: rgba(255,255,255,.07); font-size: 19px; }}
-    html.is-auth [data-guest], html.is-guest [data-auth] {{ display: none !important; }}
+    .user-icon {{ width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 999px; border: 1px solid var(--border); background: rgba(255,255,255,.07); font-size: 19px; }}
+    html.is-auth [data-guest],
+    html.is-guest [data-auth],
+    html.auth-checking [data-auth],
+    html.auth-checking [data-guest] {{ display: none !important; }}
     main {{ max-width: 1120px; margin: 0 auto; padding: 34px 22px 64px; }}
     .hero {{ min-height: 430px; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr); gap: 26px; align-items: center; padding: 34px; border: 1px solid var(--border); border-radius: 32px; background: linear-gradient(135deg, rgba(17,29,49,.94), rgba(17,29,49,.58)); box-shadow: var(--shadow); }}
     .hero h1, .auth-aside h1, .cabinet-hero h1 {{ margin: 0; font-size: clamp(34px, 5vw, 64px); line-height: .98; letter-spacing: -1.6px; }}
@@ -506,6 +518,44 @@ def _layout(title: str, body: str) -> str:
       node.textContent = message || '';
       node.className = 'notice visible' + (type ? ' ' + type : '');
     }}
+    function setAuthState(isAuth) {{
+      document.documentElement.classList.remove('auth-checking', 'is-auth', 'is-guest');
+      document.documentElement.classList.add(isAuth ? 'is-auth' : 'is-guest');
+    }}
+    function clearSessionToken() {{
+      try {{ localStorage.removeItem('twap_session_token'); }} catch (e) {{}}
+      setAuthState(false);
+    }}
+    async function refreshAuthState() {{
+      let token = '';
+      try {{ token = localStorage.getItem('twap_session_token') || ''; }} catch (e) {{}}
+      if (!token) {{
+        setAuthState(false);
+        return false;
+      }}
+      try {{
+        const res = await fetch('/api/auth/me', {{
+          headers: {{'authorization': 'Bearer ' + token}},
+          cache: 'no-store'
+        }});
+        const data = await res.json().catch(() => ({{}}));
+        if (res.status === 401) {{
+          clearSessionToken();
+          return false;
+        }}
+        if (!res.ok || data.success === false) {{
+          setAuthState(false);
+          return false;
+        }}
+        setAuthState(true);
+        return true;
+      }} catch (e) {{
+        setAuthState(false);
+        return false;
+      }}
+    }}
+    if (!window.TWAP_SKIP_AUTH_REFRESH) refreshAuthState();
   </script>
 </body>
 </html>"""
+
