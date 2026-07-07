@@ -456,6 +456,11 @@ def render_page() -> str:
     }
     .pill.ok { border-color: rgba(52, 211, 153, .46); background: rgba(52, 211, 153, .13); color: #bbf7d0; }
     .pill.bad { border-color: rgba(251, 113, 133, .46); background: rgba(251, 113, 133, .12); color: #fecdd3; }
+    .pill.warn { border-color: rgba(251, 191, 36, .46); background: rgba(251, 191, 36, .12); color: #fde68a; }
+    .blacklisted-row { background: rgba(251, 113, 133, .055); }
+    .asset-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .asset-actions button { width: auto; min-width: 126px; min-height: 34px; padding: 8px 10px; border-radius: 11px; font-size: 12px; }
+    .asset-actions .pick-symbol { min-width: 92px; }
 
     .search-row {
       display: grid;
@@ -718,10 +723,11 @@ def render_page() -> str:
         <div class="table-card">
           <div class="table-toolbar">
             <span class="table-title">Активы</span>
+            <span id="assetBlacklistSummary" class="muted small">Черный список автоторговли: 0</span>
             <label class="rows-control">Показывать строк: <select id="rowsAssets" data-table-rows="assets" onchange="saveUiSettingsFromControls(); renderAssets()"></select></label>
           </div>
           <div class="table-scroll">
-            <table><thead><tr><th>Символ</th><th>Min vol</th><th>Шаг</th><th>Плечо</th><th>Contract size</th></tr></thead><tbody id="assets"></tbody></table>
+            <table><thead><tr><th>Символ</th><th>Черный список</th><th>Min vol</th><th>Шаг</th><th>Плечо</th><th>Contract size</th></tr></thead><tbody id="assets"></tbody></table>
           </div>
         </div>
       </div>
@@ -819,6 +825,7 @@ def render_page() -> str:
           <button class="secondary" onclick="loadTradingLogs()">Логи</button>
           <button class="secondary" onclick="loadOpenTrades()">Открытые</button>
           <button class="secondary" onclick="loadFallbackReports()">Страховка</button>
+          <button class="secondary" onclick="loadSkipReports()">Пропуски</button>
         </div>
         <pre id="autoStatus" class="status"></pre>
 
@@ -849,6 +856,16 @@ def render_page() -> str:
           </div>
           <div class="table-scroll">
             <table><thead><tr><th>ID</th><th>Время</th><th>Статус</th><th>Trade key</th><th>Символ</th><th>Сообщение</th></tr></thead><tbody id="fallbackReports"></tbody></table>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="table-toolbar">
+            <span class="table-title">Отчеты пропущенных авто-сделок</span>
+            <label class="rows-control">Показывать строк: <select id="rowsSkipReports" data-table-rows="skip_reports" onchange="saveUiSettingsFromControls(); loadSkipReports()"></select></label>
+          </div>
+          <div class="table-scroll">
+            <table><thead><tr><th>ID</th><th>Время</th><th>Причина</th><th>Символ</th><th>Signal ID</th><th>Сообщение</th></tr></thead><tbody id="skipReports"></tbody></table>
           </div>
         </div>
       </div>
@@ -892,7 +909,8 @@ let uiSettings = {
     signals: 50,
     trade_logs: 50,
     open_trades: 25,
-    fallback_reports: 50
+    fallback_reports: 50,
+    skip_reports: 50
   }
 };
 let uiSaveTimer = null;
@@ -1187,12 +1205,14 @@ async function init() {
   await loadTradingLogs();
   await loadOpenTrades();
   await loadFallbackReports();
+  await loadSkipReports();
 
   setInterval(signalStatus, 5000);
   setInterval(loadSignals, 5000);
   setInterval(loadTradingLogs, 10000);
   setInterval(loadOpenTrades, 10000);
   setInterval(loadFallbackReports, 10000);
+  setInterval(loadSkipReports, 10000);
 }
 function setManualLeverage(value) {
   $('leverage').value = value;
@@ -1311,10 +1331,39 @@ async function loadAssets(renderStatus = true) {
 }
 function renderAssets() {
   const query = ($('assetSearch')?.value || '').trim().toUpperCase();
+  const blacklistedCount = assetsCache.filter(x => x.blacklisted).length;
+  if ($('assetBlacklistSummary')) $('assetBlacklistSummary').textContent = `Черный список автоторговли: ${blacklistedCount}`;
   const items = assetsCache
     .filter(x => !query || String(x.symbol || '').includes(query) || String(x.base_coin || '').toUpperCase().includes(query))
     .slice(0, rowLimit('assets'));
-  $('assets').innerHTML = items.map(x => `<tr><td><button class="secondary" onclick="pickSymbol('${esc(x.symbol)}')">${esc(x.symbol)}</button></td><td>${fmt(x.min_vol)}</td><td>${fmt(x.vol_unit)}</td><td>${fmt(x.min_leverage)}-${fmt(x.max_leverage)}</td><td>${fmt(x.contract_size)}</td></tr>`).join('');
+  $('assets').innerHTML = items.map(x => {
+    const symbol = esc(x.symbol);
+    const blacklisted = Boolean(x.blacklisted);
+    const rowClass = blacklisted ? ' class="blacklisted-row"' : '';
+    const badge = blacklisted ? '<span class="pill bad">В черном списке</span>' : '<span class="pill ok">Разрешен</span>';
+    const actionText = blacklisted ? 'Удалить' : 'Добавить';
+    const actionClass = blacklisted ? 'secondary' : 'danger';
+    return `<tr${rowClass}><td><div class="asset-actions"><button class="secondary pick-symbol" onclick="pickSymbol('${symbol}')">${symbol}</button></div></td><td><div class="asset-actions">${badge}<button class="${actionClass}" onclick="toggleAssetBlacklist('${symbol}', ${blacklisted})">${actionText}</button></div></td><td>${fmt(x.min_vol)}</td><td>${fmt(x.vol_unit)}</td><td>${fmt(x.min_leverage)}-${fmt(x.max_leverage)}</td><td>${fmt(x.contract_size)}</td></tr>`;
+  }).join('');
+}
+async function toggleAssetBlacklist(symbol, blacklisted) {
+  try {
+    const data = await api('/api/trading/asset-blacklist', {
+      method: blacklisted ? 'DELETE' : 'POST',
+      body: JSON.stringify({symbol})
+    });
+    const items = new Set((data.items || []).map(normalizeFuturesSymbol));
+    assetsCache = assetsCache.map(item => ({...item, blacklisted: items.has(normalizeFuturesSymbol(item.symbol))}));
+    renderAssets();
+    show('rules', `${symbol}: ${blacklisted ? 'удален из черного списка автоторговли' : 'добавлен в черный список автоторговли'}`);
+  } catch(e) {
+    show('rules', e.message);
+  }
+}
+function normalizeFuturesSymbol(value) {
+  const clean = String(value || '').trim().toUpperCase().replace(/[/_-]/g, '');
+  if (!clean) return '';
+  return clean.endsWith('USDT') ? clean : `${clean}USDT`;
 }
 async function ensureAssetsLoaded() {
   if (!assetsCache.length) await loadAssets(false);
@@ -1490,6 +1539,11 @@ async function loadFallbackReports() {
   const data = await api(`/api/trading/fallback-reports?limit=${rowLimit('fallback_reports')}`);
   $('fallbackReports').innerHTML = data.items.map(x => `<tr><td>${x.id || ''}</td><td>${x.triggered_at || x.created_at || ''}</td><td><span class="pill ${x.status === 'success' ? 'ok' : (x.status === 'error' ? 'bad' : '')}">${esc(x.status || '')}</span></td><td>${esc(x.trade_key || '')}</td><td>${esc(x.symbol || '')}</td><td>${esc(x.message || '')}</td></tr>`).join('');
 }
+async function loadSkipReports() {
+  const data = await api(`/api/trading/skip-reports?limit=${rowLimit('skip_reports')}`);
+  const items = data.items || [];
+  $('skipReports').innerHTML = items.map(x => `<tr><td>${x.id || ''}</td><td>${x.created_at || x.signal_created_at || ''}</td><td><span class="pill warn">${esc(x.reason_code || '')}</span></td><td>${esc(x.symbol || '')}</td><td>${x.signal_id || ''}</td><td>${esc(x.message || '')}</td></tr>`).join('');
+}
 
 function nativeWindowApiReady() {
   return Boolean(window.pywebview && window.pywebview.api);
@@ -1522,4 +1576,3 @@ init();
         html.replace("__CLIENT_BUILD_CLASS__", client_class)
         .replace("__CLIENT_BUILD_FLAVOR__", client_build_flavor)
     )
-

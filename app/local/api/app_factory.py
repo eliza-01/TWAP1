@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from app.local.api.deps import signal_client
 from app.local.api.routes import (
+    asset_blacklist,
     auth,
     exchange_assets,
     exchange_balance,
@@ -38,6 +39,7 @@ def create_local_app() -> FastAPI:
     for router in [
         ui.router,
         auth.router,
+        asset_blacklist.router,
         settings_get.router,
         settings_save.router,
         exchanges_list.router,

@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.signal_server.api.deps import signal_hub, telegram_account_bot
-from app.signal_server.api.routes import auth, health, signals_pending, site, ws_signals
+from app.signal_server.api.routes import auth, health, signals_pending, site, trading_reports, ws_signals
 from app.signal_server.auth import check_http_request
 
 
@@ -38,7 +38,6 @@ def create_signal_server_app() -> FastAPI:
         await signal_hub.stop()
         await telegram_account_bot.stop()
 
-    for router in [health.router, auth.router, signals_pending.router, ws_signals.router, site.router]:
+    for router in [health.router, auth.router, signals_pending.router, trading_reports.router, ws_signals.router, site.router]:
         app.include_router(router)
     return app
-

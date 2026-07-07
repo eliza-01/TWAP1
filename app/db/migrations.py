@@ -118,6 +118,30 @@ _TABLES = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     """,
     """
+    CREATE TABLE IF NOT EXISTS auto_trade_skip_reports (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        user_id BIGINT UNSIGNED NULL,
+        session_id BIGINT UNSIGNED NULL,
+        device_id VARCHAR(128) NOT NULL DEFAULT '',
+        device_name VARCHAR(255) NOT NULL DEFAULT '',
+        reason_code VARCHAR(64) NOT NULL,
+        symbol VARCHAR(32) NOT NULL,
+        asset VARCHAR(32) NULL,
+        side VARCHAR(16) NULL,
+        signal_id BIGINT NULL,
+        twap_id BIGINT NULL,
+        message TEXT NOT NULL,
+        signal_created_at DATETIME NULL,
+        report_json JSON NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_auto_skip_user_created (user_id, created_at),
+        KEY idx_auto_skip_symbol_created (symbol, created_at),
+        KEY idx_auto_skip_reason_created (reason_code, created_at),
+        KEY idx_auto_skip_signal (signal_id),
+        KEY idx_auto_skip_twap_id (twap_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
     CREATE TABLE IF NOT EXISTS software_users (
         id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
         login VARCHAR(64) NOT NULL,
@@ -218,4 +242,3 @@ def migrate() -> None:
                 if exc.errno not in {1060, 1061}:  # duplicate column/key
                     raise
                 logger.debug("Migration skipped existing schema object: %s", query)
-

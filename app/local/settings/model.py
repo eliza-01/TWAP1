@@ -45,6 +45,7 @@ class LocalUiSettings:
             "trade_logs": 50,
             "open_trades": 25,
             "fallback_reports": 50,
+            "skip_reports": 50,
         }
     )
 
@@ -76,6 +77,7 @@ class LocalTradingSettings:
     min_usd_override_twap_share_percent: float = 1.0
     fallback_close_enabled: bool = False
     fallback_close_grace_seconds: float = 5.0
+    blacklisted_symbols: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -175,6 +177,9 @@ def settings_from_dict(data: dict[str, Any]) -> LocalSettings:
                 trading_raw.get("fallback_close_grace_seconds"),
                 5.0,
             ),
+            blacklisted_symbols=_symbol_list(
+                trading_raw.get("blacklisted_symbols", trading_raw.get("asset_blacklist", []))
+            ),
         ),
         signals=LocalSignalSettings(
             server_ws_url=_signal_ws_url(signals_raw),
@@ -207,6 +212,32 @@ def _signal_ws_url(signals_raw: dict[str, Any]) -> str:
         or DEFAULT_SIGNAL_WS_URL
     )
     return str(value or DEFAULT_SIGNAL_WS_URL).strip()
+
+
+def normalize_futures_symbol(value: Any) -> str:
+    clean = str(value or "").strip().upper().replace("/", "").replace("_", "").replace("-", "")
+    if not clean:
+        return ""
+    return clean if clean.endswith("USDT") else f"{clean}USDT"
+
+
+def _symbol_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        raw_items = value.split(",")
+    elif isinstance(value, (list, tuple, set)):
+        raw_items = list(value)
+    else:
+        raw_items = []
+
+    seen: set[str] = set()
+    symbols: list[str] = []
+    for item in raw_items:
+        symbol = normalize_futures_symbol(item)
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        symbols.append(symbol)
+    return symbols
 
 
 def _table_rows_from_dict(raw: dict[str, Any]) -> dict[str, int]:
@@ -275,4 +306,3 @@ def _non_negative_float(value: Any, default: float) -> float:
         return parsed if parsed >= 0 else default
     except (TypeError, ValueError):
         return default
-

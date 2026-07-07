@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import httpx
+
 from app.exchanges.core.errors import ExchangeError
 from app.exchanges.core.types import CloseOrderRequest, OpenOrderRequest, TradingRules
 from app.exchanges.registry import get_exchange
@@ -170,6 +172,30 @@ class LocalAutoTrader:
 
         kind = str(signal.get("kind") or "twap_created")
         status = str(signal.get("status") or "accepted")
+
+        if kind == "twap_created" and _is_blacklisted_symbol(settings, signal):
+            symbol = _maybe_signal_symbol(signal) or str(signal.get("asset") or "")
+            message = f"Сигнал по {symbol or 'активу'} пропущен: актив находится в черном списке автоторговли"
+            report_result = await _send_skip_report(
+                settings,
+                signal,
+                reason_code="asset_blacklist",
+                message=message,
+                details={"blacklisted_symbols": settings.trading.blacklisted_symbols},
+            )
+            self.trade_store.add_log(
+                "info",
+                "skip_asset_blacklist",
+                message,
+                signal,
+                raw={
+                    "reason_code": "asset_blacklist",
+                    "blacklisted_symbols": settings.trading.blacklisted_symbols,
+                    "server_report": report_result,
+                },
+            )
+            self.trade_store.mark_signal_processed(signal_id)
+            return
 
         if kind == "twap_created" and status != "accepted":
             if settings.trading.disable_signal_filters:
@@ -536,6 +562,62 @@ async def _build_open_plan(settings: LocalSettings, adapter: Any, symbol: str, r
     )
 
 
+
+
+async def _send_skip_report(
+    settings: LocalSettings,
+    signal: dict[str, Any],
+    *,
+    reason_code: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    http_url = str(settings.signals.server_http_url or "").rstrip("/")
+    token = str(settings.account.session_token or "").strip()
+    if not http_url or not token:
+        return {"synced": False, "message": "Нет HTTP-адреса сервера или токена аккаунта"}
+
+    payload = {
+        "reason_code": reason_code,
+        "message": message,
+        "symbol": _maybe_signal_symbol(signal),
+        "asset": signal.get("asset"),
+        "side": signal.get("side"),
+        "signal_id": signal.get("signal_id") or signal.get("id"),
+        "twap_id": signal.get("twap_id"),
+        "signal_created_at": signal.get("created_at") or signal.get("message_date"),
+        "details": details or {},
+        "signal": signal,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(
+                f"{http_url}/api/trading/skip-reports",
+                headers=_session_headers(token),
+                json=payload,
+            )
+            response.raise_for_status()
+            data = response.json()
+        return {"synced": True, "response": data}
+    except Exception as exc:
+        logger.warning("Skip report sync failed: signal=%s reason=%s error=%s", signal.get("signal_id"), reason_code, exc)
+        return {"synced": False, "message": str(exc)}
+
+
+def _session_headers(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _is_blacklisted_symbol(settings: LocalSettings, signal: dict[str, Any]) -> bool:
+    symbol = _maybe_signal_symbol(signal)
+    return bool(symbol and symbol in set(settings.trading.blacklisted_symbols))
+
+
+def _maybe_signal_symbol(signal: dict[str, Any]) -> str:
+    try:
+        return _signal_symbol(signal)
+    except ExchangeError:
+        return ""
 
 
 def _local_filter_errors(settings: LocalSettings, signal: dict[str, Any]) -> list[str]:
