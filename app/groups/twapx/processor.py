@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.groups.twapx.filters import apply_filters
 from app.groups.twapx.formatter import format_forward, format_result
 from app.groups.twapx.parser import parse
 from app.shared.types import ParseResult, SourceGroupConfig
@@ -15,8 +14,10 @@ class TwapxProcessor:
         self.config = config
 
     def process(self, text: str) -> ParseResult:
-        result = parse(text)
-        return apply_filters(result, self.config.filters)
+        # Parser only normalizes Telegram messages and stores them.
+        # Deal filters are no longer server/env-level; every local client applies
+        # its own filter settings from local_data/settings.json.
+        return parse(text)
 
     def should_forward(self, result: ParseResult) -> bool:
         return result.kind == "twap_created" and result.status == "accepted"

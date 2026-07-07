@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 from typing import Any
-
 from fastapi import APIRouter, Body
 from fastapi.responses import JSONResponse
-
 from app.exchanges.core.errors import ExchangeError
 from app.exchanges.core.types import CloseOrderRequest
 from app.local.api.deps import selected_exchange
 
 router = APIRouter(prefix="/api/exchanges", tags=["orders"])
-
 
 @router.post("/{exchange}/orders/close", response_model=None)
 async def close_order(exchange: str, payload: dict = Body(...)):
@@ -20,7 +17,6 @@ async def close_order(exchange: str, payload: dict = Body(...)):
         volume_contracts = _first_float(payload, "volume_contracts")
         if amount_usdt is None and volume_contracts is None:
             amount_usdt = _first_float(payload, "volume")
-
         position_id = payload.get("position_id")
         request = CloseOrderRequest(
             symbol=str(payload.get("symbol") or "").upper(),
@@ -36,14 +32,12 @@ async def close_order(exchange: str, payload: dict = Body(...)):
     except (ExchangeError, ValueError) as exc:
         return JSONResponse(status_code=400, content={"success": False, "message": str(exc)})
 
-
 def _first_float(payload: dict[str, Any], *keys: str) -> float | None:
     for key in keys:
         value = payload.get(key)
         if value not in {None, ""}:
             return float(value)
     return None
-
 
 def _rounding(payload: dict[str, Any]) -> str:
     return "up" if payload.get("notional_rounding") == "up" else "down"

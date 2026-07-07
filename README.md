@@ -25,19 +25,88 @@ SCENARIOS.md
 - `app` — основной Telegram-слушатель.
 - `mysql` — база данных MySQL 8.4.
 - `phpmyadmin` — веб-интерфейс для просмотра БД.
-- `local` — локальный торговый клиент с UI.
-- `signal-server` — центральный HTTP/WebSocket сервер сигналов.
+- `signal-server` — публичный сайт, личный кабинет, admin, HTTP/WebSocket сервер сигналов.
+- `local` — dev-only локальный runner; для пользователей собирается exe из `client_desktop/`.
 
 ## Адреса
 
-После запуска доступны:
+После запуска адреса зависят от `STAGE` в `.env`.
+
+Prod (`STAGE=OFF`):
 
 ```text
-Локальный клиент: http://localhost:8080
-Signal Server:    http://localhost:8090
-WebSocket:        ws://localhost:8090/ws/signals
-phpMyAdmin:       http://localhost:8081
+Публичный сайт / ЛК: https://twaps.ru
+Signal Server API:   http://localhost:8090
+WebSocket:           ws://localhost:8090/ws/signals
+phpMyAdmin:          http://localhost:8081
 ```
+
+Stage (`STAGE=ON`):
+
+```text
+Публичный сайт / ЛК: https://beta.twaps.ru
+Signal Server API:   http://localhost:18090
+WebSocket:           ws://localhost:18090/ws/signals
+phpMyAdmin:          http://localhost:18081
+```
+
+Локальный торговый интерфейс больше не публикуется на домене. Пользователям отдаётся exe-клиент из `client_desktop/`.
+
+## Stage / prod запуск
+
+Переключение делается одной переменной в `.env`:
+
+```env
+STAGE=ON   # stage, beta.twaps.ru
+STAGE=OFF  # prod, twaps.ru
+```
+
+Порты задаются парами `PROD_*` и `STAGE_*` в `.env.example`. Скрипт запуска читает `STAGE`, генерирует `.env.runtime` и `.env.compose.generated`, затем запускает Docker Compose с нужными портами.
+
+Windows:
+
+```bat
+run.bat --profile server --profile local up -d --build
+```
+
+Linux/macOS:
+
+```bash
+./run.sh --profile server --profile local up -d --build
+```
+
+Или напрямую через Python:
+
+```bash
+python tools/compose.py --profile server --profile local up -d --build
+```
+
+Если запустить `docker compose up` напрямую без `tools/compose.py`, Docker Compose не сможет сам сделать if/else по `STAGE`, поэтому будут использованы fallback-порты из `docker-compose.yml`.
+
+## Cloudflare Tunnel
+
+Прокидывать наружу нужно только HTTP-сервисы. MySQL наружу через Cloudflare лучше не отдавать.
+
+Prod (`STAGE=OFF`):
+
+```text
+twaps.ru      -> http://localhost:8090   # сайт, ЛК, admin, API, WebSocket
+/ws/signals   -> http://localhost:8090   # WebSocket Signal Server
+/api/*        -> http://localhost:8090   # HTTP API
+/health       -> http://localhost:8090   # health check
+```
+
+Stage (`STAGE=ON`):
+
+```text
+beta.twaps.ru -> http://localhost:18090  # сайт, ЛК, admin, API, WebSocket
+/ws/signals   -> http://localhost:18090  # WebSocket Signal Server
+/api/*        -> http://localhost:18090  # HTTP API
+/health       -> http://localhost:18090  # health check
+```
+
+phpMyAdmin лучше не публиковать. Если всё же нужно временно открыть — prod `8081`, stage `18081`, желательно закрыть Cloudflare Access.
+
 
 ## Основные файлы и папки
 
@@ -61,13 +130,18 @@ mysql_data                   Docker volume с базой данных
 
 Если файла `.env` ещё нет, создай его из `.env.example`.
 
-В `.env` нужно заполнить Telegram App данные:
+В `.env` нужно заполнить Telegram App данные. Активный набор выбирается переменной `STAGE`:
 
 ```env
-TELEGRAM_API_ID=
-TELEGRAM_API_HASH=
-TELEGRAM_PHONE=
-TELEGRAM_SESSION_PATH=sessions/twap_user.session
+STAGE=OFF
+
+PROD_TELEGRAM_API_ID=12345678
+PROD_TELEGRAM_API_HASH=abcdef1234567890abcdef1234567890
+PROD_TELEGRAM_PHONE=+79990000000
+
+STAGE_TELEGRAM_API_ID=87654321
+STAGE_TELEGRAM_API_HASH=abcdef1234567890abcdef1234567890
+STAGE_TELEGRAM_PHONE=+79990000000
 ```
 
 `TELEGRAM_API_ID` и `TELEGRAM_API_HASH` берутся здесь:
@@ -76,27 +150,47 @@ TELEGRAM_SESSION_PATH=sessions/twap_user.session
 https://my.telegram.org/apps
 ```
 
-Пример:
+`TELEGRAM_SESSION_PATH` по умолчанию общий:
 
 ```env
-TELEGRAM_API_ID=12345678
-TELEGRAM_API_HASH=abcdef1234567890abcdef1234567890
-TELEGRAM_PHONE=+79990000000
 TELEGRAM_SESSION_PATH=sessions/twap_user.session
+```
+
+Если нужны разные session-файлы для prod и stage, можно указать:
+
+```env
+PROD_TELEGRAM_SESSION_PATH=sessions/twap_prod_user.session
+STAGE_TELEGRAM_SESSION_PATH=sessions/twap_stage_user.session
 ```
 
 ## Настройки TWAPx
 
-Настройки источника и целевого Telegram-чата:
+Источник и назначение теперь задаются одной строкой в формате `chat_id[:thread_id]`. Активный набор выбирается переменной `STAGE`:
 
 ```env
-TWAPX_SOURCE_CHAT_IDS=-1003663170785
-TWAPX_SOURCE_THREAD_IDS=
-TWAPX_SOURCE_CHAT_THREADS=
-TWAPX_TARGET_CHAT_ID=-1003918218733
-TWAPX_TARGET_THREAD_ID=4
-TWAPX_ENABLED=true
+PROD_TWAPX_SOURCES=-1003663170785
+PROD_TWAPX_TARGET=-1003918218733:4
+PROD_TWAPX_ENABLED=true
+
+STAGE_TWAPX_SOURCES=-1003918218733:2
+STAGE_TWAPX_TARGET=-1003918218733:4
+STAGE_TWAPX_ENABLED=true
 ```
+
+Если у source-чата нет forum topic/thread, указывай только chat id без `:`. Пример смешанного списка:
+
+```env
+STAGE_TWAPX_SOURCES=-1003918218733:2,-1003918218734:3,-1003918218735,-1003918218736,-1003918218737:1
+```
+
+Для target тоже используется один формат:
+
+```env
+TWAPX_TARGET=-1003918218733:4  # отправлять в topic/thread 4
+TWAPX_TARGET=-1003918218733    # отправлять просто в чат без topic/thread
+```
+
+Старые переменные `TWAPX_SOURCE_CHAT_IDS`, `TWAPX_SOURCE_THREAD_IDS`, `TWAPX_SOURCE_CHAT_THREADS`, `TWAPX_TARGET_CHAT_ID`, `TWAPX_TARGET_THREAD_ID` оставлены только для обратной совместимости.
 
 Фильтры по умолчанию:
 
@@ -150,7 +244,7 @@ DEBUG_SEND_SKIPPED=false
 
 - выбрать биржу;
 - включить или выключить биржу;
-- сохранить локальный MEXC WEB token;
+- сохранить локальный Binance API key и Secret key;
 - проверить подключение;
 - посмотреть баланс;
 - посмотреть список futures-активов;
@@ -245,32 +339,21 @@ MYSQL_ROOT_PASSWORD=root_password
 
 ## Важное по thread_id
 
-Есть два разных thread-id:
-
-- `TWAPX_SOURCE_THREAD_IDS` — какие топики читать из source-чата;
-- `TWAPX_TARGET_THREAD_ID` — в какой топик отправлять принятое сообщение.
-
-Пустой `TWAPX_SOURCE_THREAD_IDS` означает читать весь source-чат.
-
-Пример, если источник тоже forum topic:
+В `.env` больше не нужно разделять chat id и thread id на разные переменные. Используется формат:
 
 ```env
-TWAPX_SOURCE_CHAT_IDS=-1003663170785
-TWAPX_SOURCE_THREAD_IDS=4
-TWAPX_TARGET_CHAT_ID=-1003918218733
-TWAPX_TARGET_THREAD_ID=4
+TWAPX_SOURCES=-1001111111111:4,-1002222222222:9,-1003333333333
+TWAPX_TARGET=-1003918218733:4
 ```
 
-Для нескольких source-чатов с разными топиками:
+Правила:
 
-```env
-TWAPX_SOURCE_CHAT_IDS=-1001111111111,-1002222222222
-TWAPX_SOURCE_CHAT_THREADS=-1001111111111:4;5,-1002222222222:9
-```
+- `chat_id:thread_id` — слушать или отправлять в конкретный forum topic/thread;
+- `chat_id` без `:` — слушать весь чат или отправлять просто в чат;
+- несколько source-чатов разделяются запятой;
+- для нескольких топиков одного чата можно повторить chat id: `-1001:4,-1001:5`.
 
-`TWAPX_TARGET_THREAD_ID=4` передаётся в Telethon как `reply_to=4`.
-
-Для Telegram forum topic это обычно работает как отправка в топик. Если Telegram отправит сообщение не в нужный топик, нужен root message id этого forum topic.
+`thread_id` для target передаётся в Telethon как `reply_to=<thread_id>`. Для Telegram forum topic это обычно работает как отправка в топик. Если Telegram отправит сообщение не в нужный топик, нужен root message id этого forum topic.
 
 Для входящих сообщений thread определяется так:
 
@@ -318,7 +401,7 @@ GROUPS=twapx,new_group
 
 ```text
 app/exchanges/core/              общий контракт бирж
-app/exchanges/mexc/              изолированный MEXC Futures REST-адаптер
+app/exchanges/binance/              изолированный Binance USDⓈ-M Futures REST-адаптер
 app/local/                       локальный UI, настройки, клиент сигналов
 app/local/api/routes/            API локального UI
 app/signal_server/               центральный HTTP/WebSocket сервер сигналов

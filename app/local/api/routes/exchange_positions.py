@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
-
 from app.local.api.deps import selected_exchange
 
 router = APIRouter(prefix="/api/exchanges", tags=["exchanges"])
-
 
 @router.get("/{exchange}/positions")
 async def exchange_positions(exchange: str, symbol: str | None = None) -> dict:

@@ -30,24 +30,29 @@ def main() -> None:
 
     local = sub.add_parser("local", help="Start local web UI with exchange adapters")
     local.add_argument("--host", default="0.0.0.0")
-    local.add_argument("--port", type=int, default=8080)
+    local.add_argument("--port", type=int, default=None)
 
     signal_server = sub.add_parser("signal-server", help="Start central signal HTTP/WebSocket server")
     signal_server.add_argument("--host", default="0.0.0.0")
-    signal_server.add_argument("--port", type=int, default=8090)
+    signal_server.add_argument("--port", type=int, default=None)
 
     args = parser.parse_args()
 
+    settings = load_settings()
+
     if args.command == "local":
-        uvicorn.run("app.local.api.app_factory:create_local_app", host=args.host, port=args.port, factory=True)
+        # Desktop/local client must not require direct MySQL access. It talks to
+        # Signal Server over HTTPS/WebSocket and stores its own settings locally.
+        port = args.port if args.port is not None else settings.deploy.local_ui_port
+        uvicorn.run("app.local.api.app_factory:create_local_app", host=args.host, port=port, factory=True)
         return
 
-    settings = load_settings()
     init_pool(settings.db)
     migrate()
 
     if args.command == "signal-server":
-        uvicorn.run("app.signal_server.api.app_factory:create_signal_server_app", host=args.host, port=args.port, factory=True)
+        port = args.port if args.port is not None else settings.deploy.signal_server_port
+        uvicorn.run("app.signal_server.api.app_factory:create_signal_server_app", host=args.host, port=port, factory=True)
         return
 
     processors = load_processors(settings.groups)
@@ -68,3 +73,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

@@ -10,7 +10,6 @@ NotionalRounding = Literal["down", "up"]
 
 @dataclass(frozen=True)
 class ExchangeCredentials:
-    auth_token: str = ""
     api_key: str = ""
     secret_key: str = ""
 
@@ -20,6 +19,7 @@ class ExchangeConfig:
     name: str
     enabled: bool
     credentials: ExchangeCredentials = field(default_factory=ExchangeCredentials)
+    hedge_mode_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -104,3 +104,4 @@ class OrderResult:
     message: str
     order_id: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
+

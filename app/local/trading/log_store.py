@@ -23,6 +23,32 @@ class LocalTradeStore:
         trades = self._trades()
         return [trade for trade in trades if trade.get("status") == "open"]
 
+    def reset_signal_state_on_startup(self, started_at: str, clear_logs: bool = True) -> dict[str, Any]:
+        """Clear local per-run signal memory on software startup.
+
+        This deliberately keeps trade records, because old open trades are handled
+        separately by ignore_open_trades_on_startup(). The startup policy is that
+        old signals from previous local runs must not affect a new run.
+        """
+        data = self._read()
+        processed = data.get("processed_signals")
+        logs = data.get("logs")
+        processed_count = len(processed) if isinstance(processed, list) else 0
+        log_count = len(logs) if isinstance(logs, list) else 0
+
+        data["processed_signals"] = []
+        if clear_logs:
+            data["logs"] = []
+        data["signal_state_reset_at"] = started_at
+        data["signal_state_reset_reason"] = "software_started_fresh"
+        self._write(data)
+
+        return {
+            "processed_signals_cleared": processed_count,
+            "logs_cleared": log_count if clear_logs else 0,
+            "started_at": started_at,
+        }
+
     def add_log(
         self,
         level: str,
@@ -42,7 +68,7 @@ class LocalTradeStore:
                 "message": message,
                 "signal_id": _signal_id(signal),
                 "signal_kind": (signal or {}).get("kind"),
-                "symbol": (signal or {}).get("symbol") or (trade or {}).get("symbol"),
+                "symbol": _display_symbol(signal, trade),
                 "trade_key": (trade or {}).get("trade_key"),
                 "raw": raw or {},
             }
@@ -59,6 +85,7 @@ class LocalTradeStore:
     def mark_signal_processed(self, signal_id: int | None) -> None:
         if not signal_id:
             return
+
         data = self._read()
         processed = data.setdefault("processed_signals", [])
         if signal_id not in processed:
@@ -74,6 +101,7 @@ class LocalTradeStore:
             for existing in trades:
                 if existing.get("trade_key") == key and existing.get("status") == "open":
                     return existing
+
         trade.setdefault("opened_at", _now())
         trade.setdefault("status", "open")
         trades.append(trade)
@@ -81,10 +109,43 @@ class LocalTradeStore:
         self._write(data)
         return trade
 
+    def ignore_open_trades_on_startup(self, started_at: str, reason: str = "software_started_fresh") -> int:
+        data = self._read()
+        trades = data.setdefault("trades", [])
+        ignored_count = 0
+
+        for trade in trades:
+            if not isinstance(trade, dict) or trade.get("status") != "open":
+                continue
+            trade["status"] = "ignored_on_startup"
+            trade["ignored_at"] = started_at
+            trade["ignore_reason"] = reason
+            ignored_count += 1
+
+        if ignored_count:
+            self._write(data)
+
+        return ignored_count
+
+    def update_open_trade(self, trade_key: str, patch: dict[str, Any]) -> dict[str, Any] | None:
+        data = self._read()
+        trades = data.setdefault("trades", [])
+        updated: dict[str, Any] | None = None
+
+        for trade in trades:
+            if trade.get("trade_key") == trade_key and trade.get("status") == "open":
+                trade.update(patch)
+                updated = trade
+                break
+
+        self._write(data)
+        return updated
+
     def close_trade(self, trade_key: str, close_data: dict[str, Any]) -> dict[str, Any] | None:
         data = self._read()
         trades = data.setdefault("trades", [])
         closed: dict[str, Any] | None = None
+
         for trade in trades:
             if trade.get("trade_key") == trade_key and trade.get("status") == "open":
                 trade.update(close_data)
@@ -92,31 +153,46 @@ class LocalTradeStore:
                 trade.setdefault("closed_at", _now())
                 closed = trade
                 break
+
         self._write(data)
         return closed
 
     def find_open_for_signal(self, signal: dict[str, Any]) -> dict[str, Any] | None:
         candidates = self.list_open_trades()
-        related_signal_id = signal.get("related_signal_id")
-        if related_signal_id:
+        if not candidates:
+            return None
+
+        related_signal_id = _int_or_none(signal.get("related_signal_id"))
+        if related_signal_id is not None:
             for trade in candidates:
-                if int(trade.get("open_signal_id") or 0) == int(related_signal_id):
+                if _int_or_none(trade.get("open_signal_id")) == related_signal_id:
                     return trade
 
-        twap_id = signal.get("twap_id") or signal.get("original_twap_id") or (signal.get("payload") or {}).get("twap_id")
-        if twap_id:
+        twap_id = _first_present(
+            signal.get("twap_id"),
+            signal.get("original_twap_id"),
+            _dict_value(signal.get("payload"), "twap_id"),
+            _dict_value(signal.get("original"), "twap_id"),
+            _dict_value(_dict_value(signal.get("original"), "payload"), "twap_id"),
+        )
+        if twap_id is not None:
             for trade in candidates:
                 if str(trade.get("twap_id") or "") == str(twap_id):
                     return trade
 
-        symbol = signal.get("symbol") or _symbol(signal.get("asset"))
-        user_address = signal.get("user_address")
-        if symbol:
+        signal_symbols = _signal_symbols(signal)
+        signal_user = _normalize_user(signal.get("user_address") or _dict_value(signal.get("original"), "user_address"))
+
+        if signal_symbols:
             for trade in candidates:
-                if trade.get("symbol") != symbol:
+                trade_symbol = _normalize_symbol(trade.get("symbol"))
+                if trade_symbol not in signal_symbols:
                     continue
-                if user_address and trade.get("user_address") and user_address != trade.get("user_address"):
+
+                trade_user = _normalize_user(trade.get("user_address"))
+                if signal_user and trade_user and signal_user != trade_user:
                     continue
+
                 return trade
 
         return None
@@ -129,10 +205,12 @@ class LocalTradeStore:
     def _read(self) -> dict[str, Any]:
         if not self.path.exists():
             return {"trades": [], "logs": [], "processed_signals": []}
+
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return {"trades": [], "logs": [], "processed_signals": []}
+
         return data if isinstance(data, dict) else {"trades": [], "logs": [], "processed_signals": []}
 
     def _write(self, data: dict[str, Any]) -> None:
@@ -151,15 +229,68 @@ def _now() -> str:
 def _signal_id(signal: dict[str, Any] | None) -> int | None:
     if not signal:
         return None
-    value = signal.get("signal_id") or signal.get("id")
+    return _int_or_none(signal.get("signal_id") or signal.get("id"))
+
+
+def _display_symbol(signal: dict[str, Any] | None, trade: dict[str, Any] | None) -> str | None:
+    value = (signal or {}).get("symbol") or (trade or {}).get("symbol") or (signal or {}).get("asset")
+    if value is None:
+        return None
+    return str(value)
+
+
+def _signal_symbols(signal: dict[str, Any]) -> set[str]:
+    symbols: set[str] = set()
+
+    for value in (
+        signal.get("symbol"),
+        signal.get("asset"),
+        _dict_value(signal.get("payload"), "symbol"),
+        _dict_value(signal.get("payload"), "asset"),
+        _dict_value(signal.get("original"), "symbol"),
+        _dict_value(signal.get("original"), "asset"),
+        _dict_value(_dict_value(signal.get("original"), "payload"), "symbol"),
+        _dict_value(_dict_value(signal.get("original"), "payload"), "asset"),
+    ):
+        normalized = _normalize_symbol(value)
+        if normalized:
+            symbols.add(normalized)
+
+    return symbols
+
+
+def _normalize_symbol(value: Any) -> str | None:
+    if value is None:
+        return None
+
+    clean = str(value).strip().upper().replace("/", "").replace("_", "").replace("-", "")
+    if not clean:
+        return None
+    return clean if clean.endswith("USDT") else f"{clean}USDT"
+
+
+def _symbol(asset: Any) -> str | None:
+    return _normalize_symbol(asset)
+
+
+def _normalize_user(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _dict_value(value: Any, key: str) -> Any:
+    return value.get(key) if isinstance(value, dict) else None
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _int_or_none(value: Any) -> int | None:
     try:
         return int(value) if value is not None else None
     except (TypeError, ValueError):
         return None
 
-
-def _symbol(asset: Any) -> str | None:
-    if not asset:
-        return None
-    text = str(asset).upper()
-    return text if text.endswith("_USDT") else f"{text}_USDT"

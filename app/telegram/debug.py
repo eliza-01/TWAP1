@@ -310,4 +310,3 @@ def _price(value: object) -> str:
 
 def _empty(value: object) -> str:
     return "n/a" if value is None else str(value)
-

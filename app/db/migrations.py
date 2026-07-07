@@ -93,6 +93,132 @@ _TABLES = [
             REFERENCES parsed_messages(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     """,
+    """
+    CREATE TABLE IF NOT EXISTS fallback_close_reports (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        trade_key VARCHAR(128) NOT NULL,
+        open_signal_id BIGINT NULL,
+        twap_id BIGINT NULL,
+        symbol VARCHAR(32) NOT NULL,
+        direction VARCHAR(16) NOT NULL,
+        opened_at DATETIME NULL,
+        twap_started_at DATETIME NULL,
+        twap_deadline_at DATETIME NULL,
+        grace_seconds DECIMAL(12, 3) NOT NULL DEFAULT 5.000,
+        triggered_at DATETIME NOT NULL,
+        close_order_id VARCHAR(128) NULL,
+        status VARCHAR(32) NOT NULL,
+        message TEXT NOT NULL,
+        report_json JSON NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_fallback_trade_key (trade_key),
+        KEY idx_fallback_open_signal (open_signal_id),
+        KEY idx_fallback_twap_id (twap_id),
+        KEY idx_fallback_status_created (status, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS auto_trade_skip_reports (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        user_id BIGINT UNSIGNED NULL,
+        session_id BIGINT UNSIGNED NULL,
+        device_id VARCHAR(128) NOT NULL DEFAULT '',
+        device_name VARCHAR(255) NOT NULL DEFAULT '',
+        reason_code VARCHAR(64) NOT NULL,
+        symbol VARCHAR(32) NOT NULL,
+        asset VARCHAR(32) NULL,
+        side VARCHAR(16) NULL,
+        signal_id BIGINT NULL,
+        twap_id BIGINT NULL,
+        message TEXT NOT NULL,
+        signal_created_at DATETIME NULL,
+        report_json JSON NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_auto_skip_user_created (user_id, created_at),
+        KEY idx_auto_skip_symbol_created (symbol, created_at),
+        KEY idx_auto_skip_reason_created (reason_code, created_at),
+        KEY idx_auto_skip_signal (signal_id),
+        KEY idx_auto_skip_twap_id (twap_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS software_users (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        login VARCHAR(64) NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        telegram_user_id BIGINT NOT NULL,
+        telegram_chat_id BIGINT NOT NULL,
+        access_until DATETIME NULL,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_software_users_login (login),
+        UNIQUE KEY uq_software_users_telegram (telegram_user_id),
+        KEY idx_software_users_access (access_until, is_active)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS activation_keys (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        key_hash CHAR(64) NOT NULL,
+        duration_seconds BIGINT NOT NULL,
+        note VARCHAR(255) NOT NULL DEFAULT '',
+        expires_at DATETIME NULL,
+        used_by_user_id BIGINT UNSIGNED NULL,
+        used_at DATETIME NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_activation_key_hash (key_hash),
+        KEY idx_activation_keys_used (used_at),
+        KEY idx_activation_keys_expires (expires_at),
+        CONSTRAINT fk_activation_keys_user FOREIGN KEY (used_by_user_id)
+            REFERENCES software_users(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS login_codes (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        user_id BIGINT UNSIGNED NOT NULL,
+        code_hash CHAR(64) NOT NULL,
+        purpose VARCHAR(32) NOT NULL DEFAULT 'login',
+        expires_at DATETIME NOT NULL,
+        used_at DATETIME NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_login_codes_user (user_id, purpose, expires_at, used_at),
+        CONSTRAINT fk_login_codes_user FOREIGN KEY (user_id)
+            REFERENCES software_users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS telegram_registration_codes (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        telegram_user_id BIGINT NOT NULL,
+        telegram_chat_id BIGINT NOT NULL,
+        code_hash CHAR(64) NOT NULL,
+        expires_at DATETIME NOT NULL,
+        used_at DATETIME NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_tg_registration_code (code_hash, expires_at, used_at),
+        KEY idx_tg_registration_user (telegram_user_id, expires_at, used_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS user_sessions (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        user_id BIGINT UNSIGNED NOT NULL,
+        token_hash CHAR(64) NOT NULL,
+        device_id VARCHAR(128) NOT NULL DEFAULT '',
+        device_name VARCHAR(255) NOT NULL DEFAULT '',
+        started_at DATETIME NOT NULL,
+        last_seen_at DATETIME NOT NULL,
+        closed_at DATETIME NULL,
+        close_reason VARCHAR(64) NOT NULL DEFAULT '',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_user_sessions_token (token_hash),
+        KEY idx_user_sessions_user_active (user_id, closed_at, last_seen_at),
+        CONSTRAINT fk_user_sessions_user FOREIGN KEY (user_id)
+            REFERENCES software_users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """
 ]
 
 _ALTERS = [

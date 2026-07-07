@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+from app.exchanges.binance.adapter import BinanceAdapter
 from app.exchanges.core.base import ExchangeAdapter
 from app.exchanges.core.errors import ExchangeError
 from app.exchanges.core.types import ExchangeConfig, ExchangeCredentials
-from app.exchanges.mexc.adapter import MexcAdapter
 from app.local.settings.model import LocalSettings
 
 _ADAPTERS = {
-    MexcAdapter.name: MexcAdapter,
+    BinanceAdapter.name: BinanceAdapter,
 }
 
 
@@ -25,6 +25,11 @@ def get_exchange(settings: LocalSettings, name: str | None = None) -> ExchangeAd
     config = ExchangeConfig(
         name=exchange_name,
         enabled=bool(raw.enabled) if raw else False,
-        credentials=ExchangeCredentials(auth_token=raw.auth_token if raw else ""),
+        credentials=ExchangeCredentials(
+            api_key=raw.api_key if raw else "",
+            secret_key=raw.secret_key if raw else "",
+        ),
+        hedge_mode_enabled=bool(raw.hedge_mode_enabled) if raw else True,
     )
     return cls(config)
+

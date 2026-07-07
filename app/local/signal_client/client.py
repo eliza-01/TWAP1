@@ -4,7 +4,6 @@ import asyncio
 import inspect
 import json
 import logging
-import os
 import random
 import time
 from datetime import datetime, timezone
@@ -20,6 +19,7 @@ from app.local.trading.auto_trader import LocalAutoTrader
 logger = logging.getLogger(__name__)
 
 _CHECK_COOLDOWN_SECONDS = 2.0
+_FALLBACK_CHECK_SECONDS = 1.0
 
 
 class LocalSignalClient:
@@ -33,6 +33,7 @@ class LocalSignalClient:
         self.signal_store = signal_store
         self.auto_trader = auto_trader
         self._task: asyncio.Task | None = None
+        self._fallback_task: asyncio.Task | None = None
         self._stop = asyncio.Event()
         self._state = "starting"
         self._message = "Клиент сигналов запускается"
@@ -43,16 +44,26 @@ class LocalSignalClient:
         self._last_check_monotonic = 0.0
         self._last_check_result: dict[str, Any] | None = None
         self._check_lock = asyncio.Lock()
+        self._started_at = datetime.now(timezone.utc)
+        self._fresh_start_pending = True
+        self._startup_old_signals_skipped = 0
 
     def start(self) -> None:
         if self._task is None or self._task.done():
             self._stop = asyncio.Event()
+            self._started_at = datetime.now(timezone.utc)
+            self._fresh_start_pending = True
+            self._startup_old_signals_skipped = 0
+            self._reset_local_signal_state_on_startup()
             self._task = asyncio.create_task(self._run())
+        if self.auto_trader is not None and (self._fallback_task is None or self._fallback_task.done()):
+            self._fallback_task = asyncio.create_task(self._run_fallback_watch())
 
     async def stop(self) -> None:
         self._stop.set()
-        if self._task:
-            await self._task
+        tasks = [task for task in (self._task, self._fallback_task) if task is not None]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def status(self) -> dict[str, Any]:
         settings = self.settings_store.load()
@@ -62,12 +73,16 @@ class LocalSignalClient:
             "message": self._message,
             "server_ws_url": settings.signals.server_ws_url,
             "server_http_url": settings.signals.server_http_url,
-            "has_access_key": bool(_access_key()),
+            "authenticated": bool(settings.account.session_token),
+            "account_login": settings.account.login,
+            "access_until": settings.account.access_until,
             "connected_at": self._connected_at,
             "last_error_at": self._last_error_at,
             "last_signal_at": self._last_signal_at,
             "last_signal_id": settings.signals.last_signal_id,
             "local_recent_count": len(self.signal_store.list_recent(500)),
+            "fallback_close_enabled": settings.trading.fallback_close_enabled,
+            "fallback_close_grace_seconds": settings.trading.fallback_close_grace_seconds,
         }
 
     async def check_connection(self) -> dict[str, Any]:
@@ -79,7 +94,6 @@ class LocalSignalClient:
                     "cooldown": True,
                     "cooldown_seconds_left": round(_CHECK_COOLDOWN_SECONDS - (now - self._last_check_monotonic), 2),
                 }
-
             result = await self._check_connection_now()
             self._last_check_monotonic = now
             self._last_check_result = result
@@ -93,16 +107,47 @@ class LocalSignalClient:
 
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(f"{http_url}/health", headers=_access_headers())
-                response.raise_for_status()
-                data = response.json()
+                health_response = await client.get(f"{http_url}/health")
+                health_response.raise_for_status()
+                health_data = health_response.json()
+
+                auth_data = None
+                if settings.account.session_token:
+                    auth_response = await client.get(
+                        f"{http_url}/api/auth/me",
+                        headers=_session_headers(settings.account.session_token),
+                    )
+                    auth_response.raise_for_status()
+                    auth_data = auth_response.json()
         except httpx.HTTPStatusError as exc:
             body = exc.response.text[:500] if exc.response is not None else ""
             return {**self.status(), "health_ok": False, "health_message": f"HTTP {exc.response.status_code}: {body}"}
         except Exception as exc:
             return {**self.status(), "health_ok": False, "health_message": f"Сервер сигналов недоступен: {exc}"}
 
-        return {**self.status(), "health_ok": True, "health_message": "HTTP /health OK", "health_response": data}
+        return {
+            **self.status(),
+            "health_ok": True,
+            "health_message": "HTTP /health OK",
+            "health_response": health_data,
+            "auth_response": auth_data,
+        }
+
+    def _reset_local_signal_state_on_startup(self) -> None:
+        recent_cleared = self.signal_store.clear()
+        self.settings_store.update({"signals": {"last_signal_id": 0}})
+
+        if self.auto_trader is not None:
+            self.auto_trader.reset_signal_runtime_state_on_startup(
+                self._started_at,
+                local_recent_signals_cleared=recent_cleared,
+            )
+            self.auto_trader.ignore_existing_open_trades_on_startup(self._started_at)
+        else:
+            logger.warning(
+                "Startup fresh state: cleared local signal memory recent=%s and reset last_signal_id=0",
+                recent_cleared,
+            )
 
     async def _run(self) -> None:
         logger.info("Signal client runner started in WebSocket mode")
@@ -110,33 +155,39 @@ class LocalSignalClient:
         while not self._stop.is_set():
             settings = self.settings_store.load()
             url = settings.signals.server_ws_url
-
             if not url:
                 self._set_state("not_configured", "LOCAL_SIGNAL_WS_URL не задан в .env")
+                await self._sleep(2)
+                continue
+            if not settings.account.session_token:
+                self._set_state("unauthorized", "Войдите в аккаунт: нужен логин, пароль и код из Telegram-бота")
                 await self._sleep(2)
                 continue
 
             self._last_ws_url = url
             self._set_state("connecting", f"Подключение к {url}")
-
             try:
                 logger.info("Signal WS connecting: %s", url)
-                async with _connect_ws(url, _access_headers()) as ws:
+                async with _connect_ws(url, _session_headers(settings.account.session_token)) as ws:
                     reconnect_delay = 1.0
                     self._set_state("connected", "WebSocket подключен")
                     self._connected_at = _now_iso()
-                    logger.info("Signal WS connected")
-                    await ws.send(
-                        json.dumps(
-                            {
-                                "type": "hello",
-                                "last_signal_id": settings.signals.last_signal_id,
-                            },
-                            ensure_ascii=False,
-                        )
-                    )
-                    async for raw in ws:
-                        await self._handle_message(raw)
+                    logger.info("Signal WS connected as %s", settings.account.login or "unknown")
+                    hello = {
+                        "type": "hello",
+                        "last_signal_id": settings.signals.last_signal_id,
+                    }
+                    if self._fresh_start_pending:
+                        hello["fresh_start"] = True
+                        hello["fresh_start_after"] = self._started_at.isoformat()
+                    await ws.send(json.dumps(hello, ensure_ascii=False))
+                    ping_task = asyncio.create_task(_ws_ping_loop(ws))
+                    try:
+                        async for raw in ws:
+                            await self._handle_message(raw)
+                    finally:
+                        ping_task.cancel()
+                        await asyncio.gather(ping_task, return_exceptions=True)
             except Exception as exc:
                 self._last_error_at = _now_iso()
                 self._connected_at = ""
@@ -145,22 +196,50 @@ class LocalSignalClient:
                 await self._sleep(reconnect_delay + random.uniform(0, 0.5))
                 reconnect_delay = min(30.0, reconnect_delay * 1.7)
 
+    async def _run_fallback_watch(self) -> None:
+        logger.info("Fallback close watcher started")
+        while not self._stop.is_set():
+            try:
+                if self.auto_trader is not None:
+                    await self.auto_trader.check_fallback_closures()
+            except Exception as exc:
+                logger.exception("Fallback close watcher failed: %s", exc)
+            await self._sleep(_FALLBACK_CHECK_SECONDS)
+
     async def _handle_message(self, raw: str) -> None:
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
             logger.debug("Signal WS ignored non-json message")
             return
-        if not isinstance(data, dict) or data.get("type") != "signal.created":
-            logger.debug("Signal WS ignored message: %s", data.get("type") if isinstance(data, dict) else type(data).__name__)
+
+        if not isinstance(data, dict):
+            logger.debug("Signal WS ignored non-dict message")
+            return
+
+        if data.get("type") == "hello.ack":
+            self._handle_hello_ack(data)
+            return
+
+        if data.get("type") != "signal.created":
+            logger.debug("Signal WS ignored message: %s", data.get("type"))
             return
 
         signal = data.get("signal") if isinstance(data.get("signal"), dict) else data
+        signal_id = self._remember_signal_id(signal)
+
+        if _is_before_dt(signal, self._started_at):
+            self._startup_old_signals_skipped += 1
+            self._last_signal_at = _now_iso()
+            if self.auto_trader is not None:
+                self.auto_trader.log_signal_skipped_before_startup(signal)
+            if self._startup_old_signals_skipped == 1:
+                logger.info("Signal WS skips signals created before local startup")
+            return
+
         self.signal_store.add(signal)
         self._last_signal_at = _now_iso()
-        signal_id = int(signal.get("signal_id") or signal.get("id") or 0)
         if signal_id:
-            self.settings_store.update({"signals": {"last_signal_id": signal_id}})
             logger.info(
                 "Signal WS received: id=%s kind=%s status=%s symbol=%s",
                 signal_id,
@@ -171,6 +250,23 @@ class LocalSignalClient:
 
         if self.auto_trader is not None:
             await self.auto_trader.handle_signal(signal)
+
+    def _handle_hello_ack(self, data: dict[str, Any]) -> None:
+        self._fresh_start_pending = False
+        last_signal_id = _int_value(data.get("last_signal_id"))
+        if last_signal_id > 0:
+            self.settings_store.update({"signals": {"last_signal_id": last_signal_id}})
+        logger.info(
+            "Signal WS hello acknowledged: fresh_start=%s last_signal_id=%s",
+            bool(data.get("fresh_start")),
+            last_signal_id,
+        )
+
+    def _remember_signal_id(self, signal: dict[str, Any]) -> int:
+        signal_id = _int_value(signal.get("signal_id") or signal.get("id"))
+        if signal_id:
+            self.settings_store.update({"signals": {"last_signal_id": signal_id}})
+        return signal_id
 
     async def _sleep(self, seconds: float) -> None:
         try:
@@ -183,13 +279,15 @@ class LocalSignalClient:
         self._message = message
 
 
-def _access_key() -> str:
-    return (os.getenv("LOCAL_SIGNAL_ACCESS_KEY") or "").strip()
+def _session_headers(token: str) -> dict[str, str]:
+    token = (token or "").strip()
+    return {"Authorization": f"Bearer {token}", "X-Client-Session-Token": token} if token else {}
 
 
-def _access_headers() -> dict[str, str]:
-    key = _access_key()
-    return {"Authorization": f"Bearer {key}", "X-Signal-Access-Key": key} if key else {}
+async def _ws_ping_loop(ws) -> None:
+    while True:
+        await asyncio.sleep(30)
+        await ws.send(json.dumps({"type": "client.ping"}, ensure_ascii=False))
 
 
 def _connect_ws(url: str, headers: dict[str, str]):
@@ -210,3 +308,34 @@ def _connect_ws(url: str, headers: dict[str, str]):
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+
+def _int_value(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _is_before_dt(signal: dict[str, Any], boundary: datetime) -> bool:
+    signal_time = signal.get("created_at") or signal.get("message_date")
+    signal_dt = _parse_dt(signal_time)
+    if signal_dt is None:
+        return False
+    return signal_dt < boundary.astimezone(timezone.utc)
+
+
+def _parse_dt(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)

@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
-
 from app.local.api.deps import selected_exchange
 
 router = APIRouter(prefix="/api/exchanges", tags=["exchanges"])
-
 
 @router.get("/{exchange}/futures/rules")
 async def exchange_rules(exchange: str, symbol: str) -> dict:

@@ -1,14 +1,31 @@
 from __future__ import annotations
 
 import os
+import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any
+
+
+DEFAULT_SIGNAL_HTTP_URL = "https://beta.twaps.ru"
+DEFAULT_SIGNAL_WS_URL = "wss://beta.twaps.ru/ws/signals"
 
 
 @dataclass
 class LocalExchangeSettings:
     enabled: bool = False
-    auth_token: str = ""
+    api_key: str = ""
+    secret_key: str = ""
+    hedge_mode_enabled: bool = True
+
+
+@dataclass
+class LocalAccountSettings:
+    login: str = ""
+    session_token: str = ""
+    user_id: int = 0
+    access_until: str = ""
+    device_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    device_name: str = ""
 
 
 @dataclass
@@ -16,6 +33,30 @@ class LocalSignalSettings:
     server_ws_url: str = ""
     server_http_url: str = ""
     last_signal_id: int = 0
+
+
+@dataclass
+class LocalUiSettings:
+    table_rows: dict[str, int] = field(
+        default_factory=lambda: {
+            "assets": 50,
+            "positions": 25,
+            "signals": 50,
+            "trade_logs": 50,
+            "open_trades": 25,
+            "fallback_reports": 50,
+            "skip_reports": 50,
+        }
+    )
+
+
+@dataclass
+class LocalSignalFilterSettings:
+    enabled: bool = True
+    min_usd: float = 300_000.0
+    max_duration_minutes: float = 30.0
+    max_market_volume_usd: float = 100_000_000.0
+    min_twap_share_percent: float = 0.5
 
 
 @dataclass
@@ -29,42 +70,61 @@ class LocalTradingSettings:
     auto_order_usdt: float = 10.0
     auto_leverage_enabled: bool = True
     max_auto_leverage: int = 20
-    disable_signal_filters: bool = False
+    # Backward compatible name: true means "ignore server status/reason".
+    disable_signal_filters: bool = True
+    signal_filters: LocalSignalFilterSettings = field(default_factory=LocalSignalFilterSettings)
     ignore_min_usd_by_market_share: bool = False
     min_usd_override_twap_share_percent: float = 1.0
+    fallback_close_enabled: bool = False
+    fallback_close_grace_seconds: float = 5.0
+    blacklisted_symbols: list[str] = field(default_factory=list)
 
 
 @dataclass
 class LocalSettings:
-    selected_exchange: str = "mexc"
+    selected_exchange: str = "binance"
     exchanges: dict[str, LocalExchangeSettings] = field(
-        default_factory=lambda: {"mexc": LocalExchangeSettings()}
+        default_factory=lambda: {"binance": LocalExchangeSettings()}
     )
+    account: LocalAccountSettings = field(default_factory=LocalAccountSettings)
     trading: LocalTradingSettings = field(default_factory=LocalTradingSettings)
     signals: LocalSignalSettings = field(default_factory=LocalSignalSettings)
+    ui: LocalUiSettings = field(default_factory=LocalUiSettings)
 
     def to_dict(self, hide_secrets: bool = False) -> dict[str, Any]:
         data = asdict(self)
         if hide_secrets:
             for exchange in data.get("exchanges", {}).values():
-                token = exchange.get("auth_token") or ""
-                exchange["auth_token"] = _mask(token)
+                exchange["api_key"] = _mask(exchange.get("api_key") or "")
+                exchange["secret_key"] = _mask(exchange.get("secret_key") or "")
+            account = data.get("account") or {}
+            if account.get("session_token"):
+                account["session_token"] = _mask(account.get("session_token") or "")
         return data
 
 
 def settings_from_dict(data: dict[str, Any]) -> LocalSettings:
     exchanges: dict[str, LocalExchangeSettings] = {}
-    for name, raw in (data.get("exchanges") or {}).items():
-        if isinstance(raw, dict):
-            exchanges[name] = LocalExchangeSettings(
-                enabled=bool(raw.get("enabled", False)),
-                auth_token=str(raw.get("auth_token") or ""),
-            )
-    if "mexc" not in exchanges:
-        exchanges["mexc"] = LocalExchangeSettings()
 
-    trading_raw = data.get("trading") or {}
-    signals_raw = data.get("signals") or {}
+    for name, raw in (data.get("exchanges") or {}).items():
+        if name != "binance" or not isinstance(raw, dict):
+            continue
+        exchanges[name] = LocalExchangeSettings(
+            enabled=bool(raw.get("enabled", False)),
+            api_key=str(raw.get("api_key") or ""),
+            secret_key=str(raw.get("secret_key") or ""),
+            hedge_mode_enabled=_bool_value(raw.get("hedge_mode_enabled"), True),
+        )
+
+    if "binance" not in exchanges:
+        exchanges["binance"] = LocalExchangeSettings()
+
+    account_raw = data.get("account") if isinstance(data.get("account"), dict) else {}
+    trading_raw = data.get("trading") if isinstance(data.get("trading"), dict) else {}
+    signals_raw = data.get("signals") if isinstance(data.get("signals"), dict) else {}
+    ui_raw = data.get("ui") if isinstance(data.get("ui"), dict) else {}
+    filters_raw = trading_raw.get("signal_filters") if isinstance(trading_raw.get("signal_filters"), dict) else {}
+
     use_min_volume = _bool_value(trading_raw.get("use_min_volume"), False)
     max_auto_leverage = _positive_int(trading_raw.get("max_auto_leverage"), 20)
     auto_order_usdt = _positive_float(
@@ -72,9 +132,23 @@ def settings_from_dict(data: dict[str, Any]) -> LocalSettings:
         10,
     )
 
+    selected_exchange = str(data.get("selected_exchange") or "binance")
+    if selected_exchange not in exchanges:
+        selected_exchange = "binance"
+
+    device_id = str(account_raw.get("device_id") or "").strip() or uuid.uuid4().hex
+
     return LocalSettings(
-        selected_exchange=str(data.get("selected_exchange") or "mexc"),
+        selected_exchange=selected_exchange,
         exchanges=exchanges,
+        account=LocalAccountSettings(
+            login=str(account_raw.get("login") or ""),
+            session_token=str(account_raw.get("session_token") or ""),
+            user_id=_non_negative_int(account_raw.get("user_id"), 0),
+            access_until=str(account_raw.get("access_until") or ""),
+            device_id=device_id,
+            device_name=str(account_raw.get("device_name") or os.getenv("COMPUTERNAME") or os.getenv("HOSTNAME") or "local-client"),
+        ),
         trading=LocalTradingSettings(
             default_volume=_positive_float(trading_raw.get("default_volume"), 1),
             default_leverage=1 if use_min_volume else _positive_int(trading_raw.get("default_leverage"), 1),
@@ -85,19 +159,105 @@ def settings_from_dict(data: dict[str, Any]) -> LocalSettings:
             auto_order_usdt=auto_order_usdt,
             auto_leverage_enabled=False if use_min_volume else _bool_value(trading_raw.get("auto_leverage_enabled"), True),
             max_auto_leverage=1 if use_min_volume else max_auto_leverage,
-            disable_signal_filters=_bool_value(trading_raw.get("disable_signal_filters"), False),
+            disable_signal_filters=_bool_value(trading_raw.get("disable_signal_filters"), True),
+            signal_filters=LocalSignalFilterSettings(
+                enabled=_bool_value(filters_raw.get("enabled"), True),
+                min_usd=_non_negative_float(filters_raw.get("min_usd"), 300_000.0),
+                max_duration_minutes=_positive_float(filters_raw.get("max_duration_minutes"), 30.0),
+                max_market_volume_usd=_positive_float(filters_raw.get("max_market_volume_usd"), 100_000_000.0),
+                min_twap_share_percent=_non_negative_float(filters_raw.get("min_twap_share_percent"), 0.5),
+            ),
             ignore_min_usd_by_market_share=_bool_value(trading_raw.get("ignore_min_usd_by_market_share"), False),
             min_usd_override_twap_share_percent=_positive_float(
                 trading_raw.get("min_usd_override_twap_share_percent"),
                 1.0,
             ),
+            fallback_close_enabled=_bool_value(trading_raw.get("fallback_close_enabled"), False),
+            fallback_close_grace_seconds=_non_negative_float(
+                trading_raw.get("fallback_close_grace_seconds"),
+                5.0,
+            ),
+            blacklisted_symbols=_symbol_list(
+                trading_raw.get("blacklisted_symbols", trading_raw.get("asset_blacklist", []))
+            ),
         ),
         signals=LocalSignalSettings(
-            server_ws_url=str(os.getenv("LOCAL_SIGNAL_WS_URL") or ""),
-            server_http_url=str(os.getenv("LOCAL_SIGNAL_HTTP_URL") or ""),
+            server_ws_url=_signal_ws_url(signals_raw),
+            server_http_url=_signal_http_url(signals_raw),
             last_signal_id=int(signals_raw.get("last_signal_id") or 0),
         ),
+        ui=LocalUiSettings(
+            table_rows=_table_rows_from_dict(
+                ui_raw.get("table_rows") if isinstance(ui_raw.get("table_rows"), dict) else {}
+            ),
+        ),
     )
+
+
+def _signal_http_url(signals_raw: dict[str, Any]) -> str:
+    value = (
+        os.getenv("TWAP_CLIENT_HTTP_URL")
+        or os.getenv("LOCAL_SIGNAL_HTTP_URL")
+        or signals_raw.get("server_http_url")
+        or DEFAULT_SIGNAL_HTTP_URL
+    )
+    return str(value or DEFAULT_SIGNAL_HTTP_URL).strip().rstrip("/")
+
+
+def _signal_ws_url(signals_raw: dict[str, Any]) -> str:
+    value = (
+        os.getenv("TWAP_CLIENT_WS_URL")
+        or os.getenv("LOCAL_SIGNAL_WS_URL")
+        or signals_raw.get("server_ws_url")
+        or DEFAULT_SIGNAL_WS_URL
+    )
+    return str(value or DEFAULT_SIGNAL_WS_URL).strip()
+
+
+def normalize_futures_symbol(value: Any) -> str:
+    clean = str(value or "").strip().upper().replace("/", "").replace("_", "").replace("-", "")
+    if not clean:
+        return ""
+    return clean if clean.endswith("USDT") else f"{clean}USDT"
+
+
+def _symbol_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        raw_items = value.split(",")
+    elif isinstance(value, (list, tuple, set)):
+        raw_items = list(value)
+    else:
+        raw_items = []
+
+    seen: set[str] = set()
+    symbols: list[str] = []
+    for item in raw_items:
+        symbol = normalize_futures_symbol(item)
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        symbols.append(symbol)
+    return symbols
+
+
+def _table_rows_from_dict(raw: dict[str, Any]) -> dict[str, int]:
+    defaults = LocalUiSettings().table_rows
+    return {
+        key: _bounded_int(raw.get(key), default, 10, 500)
+        for key, default in defaults.items()
+    }
+
+
+def _bounded_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    if parsed < minimum:
+        return minimum
+    if parsed > maximum:
+        return maximum
+    return parsed
 
 
 def _mask(value: str) -> str:
@@ -116,17 +276,33 @@ def _bool_value(value: Any, default: bool) -> bool:
     return bool(value)
 
 
-def _positive_float(value: Any, default: float) -> float:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return default
-    return parsed if parsed > 0 else default
-
-
 def _positive_int(value: Any, default: int) -> int:
     try:
         parsed = int(value)
+        return parsed if parsed > 0 else default
     except (TypeError, ValueError):
         return default
-    return parsed if parsed > 0 else default
+
+
+def _non_negative_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+        return parsed if parsed >= 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _positive_float(value: Any, default: float) -> float:
+    try:
+        parsed = float(value)
+        return parsed if parsed > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _non_negative_float(value: Any, default: float) -> float:
+    try:
+        parsed = float(value)
+        return parsed if parsed >= 0 else default
+    except (TypeError, ValueError):
+        return default

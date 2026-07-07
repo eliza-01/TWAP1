@@ -1,12 +1,44 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from app.db.connection import db_cursor
 
 
 class SignalRepository:
+    def max_signal_id(self) -> int:
+        with db_cursor(dictionary=True) as cursor:
+            cursor.execute("SELECT COALESCE(MAX(id), 0) AS max_id FROM twap_signals")
+            row = cursor.fetchone() or {}
+        try:
+            return int(row.get("max_id") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def max_signal_id_before(self, boundary: Any) -> int:
+        parsed_boundary = _parse_dt(boundary)
+        if parsed_boundary is None:
+            return self.max_signal_id()
+
+        with db_cursor(dictionary=True) as cursor:
+            cursor.execute(
+                """
+                SELECT COALESCE(MAX(ts.id), 0) AS max_id
+                FROM twap_signals ts
+                JOIN parsed_messages pm ON pm.id = ts.parsed_message_id
+                JOIN incoming_messages im ON im.id = pm.incoming_message_id
+                WHERE COALESCE(im.message_date, ts.created_at) < %s
+                """,
+                (_mysql_dt(parsed_boundary),),
+            )
+            row = cursor.fetchone() or {}
+        try:
+            return int(row.get("max_id") or 0)
+        except (TypeError, ValueError):
+            return 0
+
     def list_pending(self, after_id: int = 0, limit: int = 100, include_rejected: bool = False) -> list[dict[str, Any]]:
         with db_cursor(dictionary=True) as cursor:
             cursor.execute(
@@ -125,3 +157,23 @@ def _symbol(asset: Any) -> str | None:
         return None
     text = str(asset).upper()
     return text if text.endswith("_USDT") else f"{text}_USDT"
+
+
+
+def _parse_dt(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _mysql_dt(value: datetime) -> str:
+    return value.astimezone(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
