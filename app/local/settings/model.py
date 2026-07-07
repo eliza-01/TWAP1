@@ -32,6 +32,20 @@ class LocalSignalSettings:
 
 
 @dataclass
+class LocalUiSettings:
+    table_rows: dict[str, int] = field(
+        default_factory=lambda: {
+            "assets": 50,
+            "positions": 25,
+            "signals": 50,
+            "trade_logs": 50,
+            "open_trades": 25,
+            "fallback_reports": 50,
+        }
+    )
+
+
+@dataclass
 class LocalSignalFilterSettings:
     enabled: bool = True
     min_usd: float = 300_000.0
@@ -69,6 +83,7 @@ class LocalSettings:
     account: LocalAccountSettings = field(default_factory=LocalAccountSettings)
     trading: LocalTradingSettings = field(default_factory=LocalTradingSettings)
     signals: LocalSignalSettings = field(default_factory=LocalSignalSettings)
+    ui: LocalUiSettings = field(default_factory=LocalUiSettings)
 
     def to_dict(self, hide_secrets: bool = False) -> dict[str, Any]:
         data = asdict(self)
@@ -99,8 +114,9 @@ def settings_from_dict(data: dict[str, Any]) -> LocalSettings:
         exchanges["binance"] = LocalExchangeSettings()
 
     account_raw = data.get("account") if isinstance(data.get("account"), dict) else {}
-    trading_raw = data.get("trading") or {}
-    signals_raw = data.get("signals") or {}
+    trading_raw = data.get("trading") if isinstance(data.get("trading"), dict) else {}
+    signals_raw = data.get("signals") if isinstance(data.get("signals"), dict) else {}
+    ui_raw = data.get("ui") if isinstance(data.get("ui"), dict) else {}
     filters_raw = trading_raw.get("signal_filters") if isinstance(trading_raw.get("signal_filters"), dict) else {}
 
     use_min_volume = _bool_value(trading_raw.get("use_min_volume"), False)
@@ -161,7 +177,32 @@ def settings_from_dict(data: dict[str, Any]) -> LocalSettings:
             server_http_url=str(os.getenv("LOCAL_SIGNAL_HTTP_URL") or signals_raw.get("server_http_url") or ""),
             last_signal_id=int(signals_raw.get("last_signal_id") or 0),
         ),
+        ui=LocalUiSettings(
+            table_rows=_table_rows_from_dict(
+                ui_raw.get("table_rows") if isinstance(ui_raw.get("table_rows"), dict) else {}
+            ),
+        ),
     )
+
+
+def _table_rows_from_dict(raw: dict[str, Any]) -> dict[str, int]:
+    defaults = LocalUiSettings().table_rows
+    return {
+        key: _bounded_int(raw.get(key), default, 10, 500)
+        for key, default in defaults.items()
+    }
+
+
+def _bounded_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    if parsed < minimum:
+        return minimum
+    if parsed > maximum:
+        return maximum
+    return parsed
 
 
 def _mask(value: str) -> str:
@@ -210,3 +251,4 @@ def _non_negative_float(value: Any, default: float) -> float:
         return parsed if parsed >= 0 else default
     except (TypeError, ValueError):
         return default
+
