@@ -43,6 +43,43 @@ def executable_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def bundled_resource_path(*parts: str) -> Path:
+    """Return path to a source/bundled runtime resource."""
+    if is_frozen() and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS).resolve().joinpath(*parts)  # type: ignore[attr-defined]
+    return Path(__file__).resolve().parent.parent.joinpath(*parts)
+
+
+def app_icon_png_path() -> Path | None:
+    configured = os.getenv("TWAPS_ICON_PATH", "").strip()
+    candidates: list[Path] = []
+    if configured:
+        candidates.append(Path(configured).expanduser().resolve())
+    candidates.extend(
+        [
+            bundled_resource_path("client_desktop", "assets", "twaps_icon_256.png"),
+            executable_dir() / "assets" / "twaps_icon_256.png",
+            executable_dir() / "twaps_icon_256.png",
+        ]
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def app_icon_ico_path() -> Path | None:
+    candidates = [
+        bundled_resource_path("client_desktop", "assets", "twaps_icon.ico"),
+        executable_dir() / "assets" / "twaps_icon.ico",
+        executable_dir() / "twaps_icon.ico",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def default_data_dir() -> Path:
     configured = os.getenv("TWAPS_DATA_DIR")
     if configured:

@@ -57,8 +57,26 @@ echo Endpoint WS:   %TWAP_CLIENT_WS_URL%
 echo Output:        %TWAP_DIST%\%TWAP_EXE_NAME%.exe
 echo.
 
-call :find_python
-if errorlevel 1 goto python_missing
+set "TWAPS_PY="
+where py >nul 2>nul
+if not errorlevel 1 (
+  py -3.12 --version >nul 2>nul
+  if not errorlevel 1 set "TWAPS_PY=py -3.12"
+
+  if not defined TWAPS_PY (
+    py -3 --version >nul 2>nul
+    if not errorlevel 1 set "TWAPS_PY=py -3"
+  )
+)
+if not defined TWAPS_PY (
+  python --version >nul 2>nul
+  if not errorlevel 1 set "TWAPS_PY=python"
+)
+if not defined TWAPS_PY (
+  python3 --version >nul 2>nul
+  if not errorlevel 1 set "TWAPS_PY=python3"
+)
+if not defined TWAPS_PY goto python_missing
 
 echo Using Python command: %TWAPS_PY%
 echo.
@@ -87,6 +105,10 @@ echo Writing generated build config...
 "%VENV_PY%" -c "from pathlib import Path; p=Path('client_desktop/build_config_generated.py'); p.write_text('BUILD_FLAVOR = '+repr('%TWAP_BUILD_FLAVOR%')+'\nDEFAULT_HTTP_URL = '+repr('%TWAP_CLIENT_HTTP_URL%')+'\nDEFAULT_WS_URL = '+repr('%TWAP_CLIENT_WS_URL%')+'\nAPP_TITLE = '+repr('%TWAP_APP_TITLE%')+'\n', encoding='utf-8')"
 if errorlevel 1 goto error
 
+echo Preparing application icon...
+"%VENV_PY%" -m client_desktop.icon_tools
+if errorlevel 1 goto error
+
 echo.
 echo Building %TWAP_KIND_TITLE% %TWAP_BUILD_FLAVOR% client...
 if exist "%TWAP_DIST%\%TWAP_EXE_NAME%.exe" (
@@ -102,33 +124,6 @@ echo Done: %TWAP_DIST%\%TWAP_EXE_NAME%.exe
 echo.
 if not "%TWAPS_NO_PAUSE%"=="1" pause
 exit /b 0
-
-:find_python
-set "TWAPS_PY="
-where py >nul 2>nul
-if not errorlevel 1 (
-  py -3.12 --version >nul 2>nul
-  if not errorlevel 1 (
-    set "TWAPS_PY=py -3.12"
-    exit /b 0
-  )
-  py -3 --version >nul 2>nul
-  if not errorlevel 1 (
-    set "TWAPS_PY=py -3"
-    exit /b 0
-  )
-)
-python --version >nul 2>nul
-if not errorlevel 1 (
-  set "TWAPS_PY=python"
-  exit /b 0
-)
-python3 --version >nul 2>nul
-if not errorlevel 1 (
-  set "TWAPS_PY=python3"
-  exit /b 0
-)
-exit /b 1
 
 :python_missing
 echo Python 3 was not found.
@@ -152,3 +147,4 @@ echo Build failed. Error code: %ERRORLEVEL%
 echo.
 if not "%TWAPS_NO_PAUSE%"=="1" pause
 exit /b 1
+

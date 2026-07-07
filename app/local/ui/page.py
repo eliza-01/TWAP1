@@ -91,7 +91,7 @@ def render_page() -> str:
       padding: 12px 14px;
       border-radius: 16px;
       border: 1px solid var(--border-strong);
-      background: rgba(17, 26, 42, .94);
+      background: rgb(0 63 63 / 94%);
       box-shadow: 0 10px 30px rgba(0, 0, 0, .22);
       font-weight: 850;
       line-height: 1.35;

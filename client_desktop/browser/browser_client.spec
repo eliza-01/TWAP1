@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(SPECPATH).parents[1]
 EXE_NAME = os.getenv("TWAP_EXE_NAME", "TWAPs Browser Client")
+ICON_ICO = ROOT / "client_desktop" / "assets" / "twaps_icon.ico"
 
 hiddenimports = [
     "client_desktop.build_config_generated",
@@ -54,4 +55,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=str(ICON_ICO) if ICON_ICO.exists() else None,
 )
