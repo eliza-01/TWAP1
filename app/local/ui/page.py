@@ -571,6 +571,7 @@ def render_page() -> str:
           <div class="field"><label>Макс. длительность, мин</label><input id="filterMaxDuration" type="number" step="1" min="1" value="30" /></div>
           <div class="field"><label>Макс. market volume, USD</label><input id="filterMaxMarketVolume" type="number" step="1000000" min="1" value="100000000" /></div>
           <div class="field"><label>Мин. TWAP share, %</label><input id="filterMinShare" type="number" step="0.01" min="0" value="0.5" /></div>
+          <div class="field"><label>Макс. TWAP share, %</label><input id="minUsdOverrideShare" type="number" step="0.01" min="0.01" value="1" /></div>
         </div>
 
         <details class="subsection">
@@ -579,7 +580,6 @@ def render_page() -> str:
             <div class="form-grid">
               <div class="field critical"><label>Входить минимальным объемом</label><select id="useMinVolume" onchange="applyMinVolumeFlag()"><option value="false">Нет</option><option value="true">Да, плечо 1x</option></select></div>
               <div class="field critical"><label>Игнорировать min USD по доле рынка</label><select id="ignoreMinUsdByShare"><option value="false">Нет</option><option value="true">Да, только min USD</option></select></div>
-              <div class="field"><label>Макс. TWAP share, %</label><input id="minUsdOverrideShare" type="number" step="0.01" min="0.01" value="1" /></div>
             </div>
           </div>
         </details>
