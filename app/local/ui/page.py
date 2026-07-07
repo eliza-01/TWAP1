@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import os
+
+
+def _client_build_flavor() -> str:
+    return (os.getenv("TWAP_CLIENT_BUILD_ENV") or os.getenv("APP_ENV") or "stage").strip().lower() or "stage"
+
 
 def render_page() -> str:
-    return """<!doctype html>
+    client_build_flavor = _client_build_flavor()
+    html = """<!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
@@ -458,6 +465,135 @@ def render_page() -> str:
       margin-bottom: 14px;
     }
 
+
+    body.prod-client .status {
+      display: none !important;
+    }
+    body.stage-client .customer-report {
+      display: none !important;
+    }
+    .customer-report {
+      margin: 0 0 14px;
+      border: 1px solid rgba(96, 165, 250, .24);
+      border-radius: 22px;
+      background:
+        linear-gradient(135deg, rgba(17, 26, 42, .92), rgba(8, 16, 28, .82)),
+        radial-gradient(circle at 8% 0%, rgba(110, 231, 183, .12), transparent 34%);
+      box-shadow: 0 14px 38px rgba(0, 0, 0, .20);
+      overflow: hidden;
+    }
+    .customer-report > summary {
+      cursor: pointer;
+      list-style: none;
+      padding: 16px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      user-select: none;
+    }
+    .customer-report > summary::-webkit-details-marker { display: none; }
+    .customer-report > summary::after {
+      content: "⌄";
+      color: var(--muted);
+      font-size: 18px;
+      transition: transform .18s ease;
+    }
+    .customer-report[open] > summary::after { transform: rotate(180deg); }
+    .customer-report-heading {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+    .customer-report-icon {
+      width: 34px;
+      height: 34px;
+      flex: 0 0 auto;
+      border-radius: 13px;
+      display: grid;
+      place-items: center;
+      color: #07111f;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      font-weight: 950;
+    }
+    .customer-report-title {
+      font-weight: 950;
+      letter-spacing: -.01em;
+    }
+    .customer-report-subtitle {
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .customer-report-badge {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid rgba(96, 165, 250, .34);
+      border-radius: 999px;
+      padding: 6px 10px;
+      color: #bfdbfe;
+      background: rgba(96, 165, 250, .10);
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    .customer-report.ok .customer-report-badge {
+      border-color: rgba(52, 211, 153, .44);
+      background: rgba(52, 211, 153, .12);
+      color: #bbf7d0;
+    }
+    .customer-report.warn .customer-report-badge {
+      border-color: rgba(251, 191, 36, .46);
+      background: rgba(251, 191, 36, .12);
+      color: #fde68a;
+    }
+    .customer-report.bad .customer-report-badge {
+      border-color: rgba(251, 113, 133, .46);
+      background: rgba(251, 113, 133, .12);
+      color: #fecdd3;
+    }
+    .customer-report-body {
+      border-top: 1px solid var(--border);
+      padding: 14px 18px 18px;
+    }
+    .friendly-report-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+    }
+    .friendly-report-card {
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: rgba(8, 16, 28, .66);
+      padding: 12px;
+    }
+    .friendly-report-card span {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+      letter-spacing: .03em;
+      text-transform: uppercase;
+    }
+    .friendly-report-card b {
+      display: block;
+      color: var(--text);
+      font-size: 15px;
+      line-height: 1.38;
+      word-break: break-word;
+    }
+    .friendly-report-note {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
     @media (max-width: 1000px) {
       .field { grid-column: span 6; }
       .field.wide, .field.half { grid-column: 1 / -1; }
@@ -475,7 +611,7 @@ def render_page() -> str:
     }
   </style>
 </head>
-<body>
+<body class="__CLIENT_BUILD_CLASS__">
 <header class="topbar">
   <div class="topbar-inner">
     <div class="brand" title="TWAPs">
@@ -504,6 +640,26 @@ def render_page() -> str:
       <span class="muted">Статус ещё не загружен</span>
     </div>
   </div>
+
+  <details id="customerReport" class="customer-report">
+    <summary>
+      <span class="customer-report-heading">
+        <span class="customer-report-icon">✓</span>
+        <span>
+          <span id="customerReportTitle" class="customer-report-title">Отчет по последнему действию</span>
+          <span id="customerReportSubtitle" class="customer-report-subtitle">Здесь будет простой отчет без технического JSON. Блок можно раскрыть при необходимости.</span>
+        </span>
+      </span>
+      <span id="customerReportBadge" class="customer-report-badge">Ожидание</span>
+    </summary>
+    <div id="customerReportBody" class="customer-report-body">
+      <div class="friendly-report-grid">
+        <div class="friendly-report-card"><span>Статус</span><b>Действий пока не было.</b></div>
+      </div>
+      <div class="friendly-report-note">Технические данные скрыты в клиентской prod-сборке. В stage-сборке они остаются видимыми для отладки.</div>
+    </div>
+  </details>
+
 
   <div class="sections">
     <details class="section" open>
@@ -742,7 +898,141 @@ let uiSettings = {
 let uiSaveTimer = null;
 
 const $ = id => document.getElementById(id);
-const show = (id, data) => $(id).textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+const CLIENT_BUILD_FLAVOR = "__CLIENT_BUILD_FLAVOR__";
+const PROD_CLIENT = CLIENT_BUILD_FLAVOR === 'prod';
+const REPORT_TITLES = {
+  authStatus: 'Аккаунт',
+  status: 'Биржа',
+  rules: 'Параметры контракта',
+  tradeResult: 'Ручная сделка',
+  autoStatus: 'Автоторговля',
+  signalStatus: 'Сервер сигналов'
+};
+
+function show(id, data) {
+  const target = $(id);
+  if (target) target.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  if (PROD_CLIENT) renderCustomerReport(id, data);
+}
+
+function renderCustomerReport(id, data) {
+  const report = $('customerReport');
+  const body = $('customerReportBody');
+  if (!report || !body) return;
+  const friendly = friendlyReport(id, data);
+  report.className = `customer-report ${friendly.level}`;
+  $('customerReportTitle').textContent = friendly.title;
+  $('customerReportSubtitle').textContent = friendly.subtitle;
+  $('customerReportBadge').textContent = friendly.badge;
+  body.innerHTML = `<div class="friendly-report-grid">${friendly.rows.map(row => `<div class="friendly-report-card"><span>${esc(row[0])}</span><b>${esc(row[1])}</b></div>`).join('')}</div>${friendly.note ? `<div class="friendly-report-note">${esc(friendly.note)}</div>` : ''}`;
+}
+
+function friendlyReport(id, data) {
+  const title = REPORT_TITLES[id] || 'Отчет';
+  const level = reportLevel(data);
+  const badge = level === 'ok' ? 'Готово' : (level === 'bad' ? 'Внимание' : 'Информация');
+  const rows = [];
+  let subtitle = 'Операция обработана.';
+  let note = '';
+
+  if (typeof data === 'string') {
+    subtitle = level === 'bad' ? 'Нужно обратить внимание.' : 'Сообщение от приложения.';
+    rows.push(['Сообщение', data || 'Операция выполнена.']);
+    return {title, subtitle, badge, level, rows, note};
+  }
+
+  const obj = (data && typeof data === 'object') ? data : {};
+  const message = obj.message || obj.detail || obj.health_message || '';
+
+  if (id === 'authStatus') {
+    const account = obj.account || obj.user || {};
+    subtitle = obj.authenticated || obj.success || account.has_session_token ? 'Вход выполнен, аккаунт подключен.' : 'Проверьте логин, пароль и Telegram-код.';
+    rows.push(['Состояние', obj.authenticated || account.has_session_token ? 'Аккаунт подключен' : (message || 'Аккаунт пока не подключен')]);
+    if (account.login) rows.push(['Логин', account.login]);
+    if (account.access_until) rows.push(['Доступ до', formatDateTime(account.access_until)]);
+  } else if (id === 'status') {
+    subtitle = obj.status === 'connected' ? 'Биржа подключена и готова к работе.' : 'Подключение к бирже требует проверки.';
+    rows.push(['Состояние', statusTitle(obj.status || obj.exchange || '—')]);
+    if (message) rows.push(['Комментарий', message]);
+    if (obj.currency || obj.available !== undefined || obj.equity !== undefined) {
+      rows.push(['Доступно', `${fmtMoney(obj.available)} ${obj.currency || ''}`.trim()]);
+      rows.push(['Баланс', `${fmtMoney(obj.equity)} ${obj.currency || ''}`.trim()]);
+    }
+  } else if (id === 'rules') {
+    subtitle = obj.symbol ? `Правила контракта ${obj.symbol} загружены.` : 'Правила контракта обновлены.';
+    rows.push(['Символ', obj.symbol || '—']);
+    rows.push(['Минимальная сделка', obj.min_notional_usdt ? fmtMoney(obj.min_notional_usdt) : 'Не указана биржей']);
+    rows.push(['Минимальный объем', fmt(obj.min_volume)]);
+    rows.push(['Шаг объема', fmt(obj.volume_step)]);
+    rows.push(['Плечо', `${fmt(obj.min_leverage)}x – ${fmt(obj.max_leverage)}x`]);
+    rows.push(['Текущая цена', fmt(obj.price)]);
+  } else if (id === 'tradeResult') {
+    subtitle = obj.success === false ? 'Ордер не был отправлен.' : 'Запрос по сделке обработан.';
+    rows.push(['Результат', obj.success === false ? 'Не выполнено' : (message || 'Операция выполнена')]);
+    if (obj.order_id) rows.push(['ID ордера', obj.order_id]);
+    const meta = obj.raw?.meta || {};
+    if (meta.rounded_amount_usdt !== undefined) rows.push(['Объем после округления', fmtMoney(meta.rounded_amount_usdt)]);
+    if (meta.leverage !== undefined && meta.leverage !== null) rows.push(['Плечо', `${meta.leverage}x`]);
+  } else if (id === 'autoStatus') {
+    const trading = obj.trading || obj || {};
+    subtitle = 'Настройки автоторговли сохранены локально.';
+    rows.push(['Автоторговля', trading.auto_trading_enabled ? 'Включена' : 'Выключена']);
+    rows.push(['Страховка TWAP', trading.fallback_close_enabled ? 'Включена' : 'Выключена']);
+    rows.push(['Объем сделки', fmtMoney(trading.auto_order_usdt)]);
+    rows.push(['Плечо', `${fmt(trading.default_leverage)}x`]);
+    rows.push(['Фильтры входа', trading.disable_signal_filters ? 'Отключены' : 'Включены']);
+  } else if (id === 'signalStatus') {
+    const state = obj.state || (obj.health_ok ? 'connected' : 'error');
+    subtitle = state === 'connected' && obj.health_ok !== false ? 'Соединение с сервером сигналов работает.' : 'Клиент пытается восстановить связь с сервером сигналов.';
+    rows.push(['Состояние', signalStateTitle(state)]);
+    if (message) rows.push(['Комментарий', message]);
+    if (obj.local_recent_count !== undefined) rows.push(['Локальных сигналов', String(obj.local_recent_count)]);
+    if (obj.auto_trading_enabled !== undefined) rows.push(['Автоторговля', obj.auto_trading_enabled ? 'Включена' : 'Выключена']);
+  } else {
+    subtitle = message || 'Операция выполнена.';
+    rows.push(['Результат', message || 'Операция выполнена']);
+  }
+
+  if (!rows.length) rows.push(['Результат', message || 'Операция выполнена']);
+  return {title, subtitle, badge, level, rows: rows.slice(0, 8), note};
+}
+
+function reportLevel(data) {
+  if (typeof data === 'string') {
+    const text = data.toLowerCase();
+    if (text.includes('error') || text.includes('ошиб') || text.includes('не удалось') || text.includes('failed') || text.includes('нет соединения')) return 'bad';
+    if (text.includes('предупреж') || text.includes('отключ')) return 'warn';
+    return 'ok';
+  }
+  if (!data || typeof data !== 'object') return 'warn';
+  if (data.success === false || data.status === 'error' || data.state === 'error' || data.health_ok === false) return 'bad';
+  if (['connecting', 'reconnecting', 'disabled', 'not_configured'].includes(String(data.status || data.state || '').toLowerCase())) return 'warn';
+  return 'ok';
+}
+
+function statusTitle(value) {
+  const clean = String(value || '').toLowerCase();
+  if (clean === 'connected') return 'Подключено';
+  if (clean === 'disabled') return 'Биржа отключена';
+  if (clean === 'not_configured') return 'Нужны API-ключи';
+  if (clean === 'error') return 'Ошибка подключения';
+  return String(value || '—');
+}
+
+function signalStateTitle(value) {
+  const clean = String(value || '').toLowerCase();
+  if (clean === 'connected') return 'Подключено';
+  if (clean === 'connecting') return 'Подключение';
+  if (clean === 'reconnecting') return 'Переподключение';
+  if (clean === 'error') return 'Нет соединения';
+  return String(value || '—');
+}
+
+function formatDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value || '—');
+  return date.toLocaleString('ru-RU');
+}
 const fmt = value => value === null || value === undefined ? '' : value;
 const fmtMoney = value => value === null || value === undefined || value === '' ? '' : `$${Number(value).toFixed(2)}`;
 const esc = value => String(value ?? '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[s]));
@@ -1227,3 +1517,9 @@ init();
 </script>
 </body>
 </html>"""
+    client_class = "prod-client" if client_build_flavor == "prod" else "stage-client"
+    return (
+        html.replace("__CLIENT_BUILD_CLASS__", client_class)
+        .replace("__CLIENT_BUILD_FLAVOR__", client_build_flavor)
+    )
+
