@@ -13,7 +13,7 @@ from typing import Iterable
 
 INCLUDE_DIRS = (
     "app",
-    "tests",
+    # "tests",
     "tools",
 )
 
