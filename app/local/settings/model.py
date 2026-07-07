@@ -6,6 +6,10 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
+DEFAULT_SIGNAL_HTTP_URL = "https://beta.twaps.ru"
+DEFAULT_SIGNAL_WS_URL = "wss://beta.twaps.ru/ws/signals"
+
+
 @dataclass
 class LocalExchangeSettings:
     enabled: bool = False
@@ -173,8 +177,8 @@ def settings_from_dict(data: dict[str, Any]) -> LocalSettings:
             ),
         ),
         signals=LocalSignalSettings(
-            server_ws_url=str(os.getenv("LOCAL_SIGNAL_WS_URL") or signals_raw.get("server_ws_url") or ""),
-            server_http_url=str(os.getenv("LOCAL_SIGNAL_HTTP_URL") or signals_raw.get("server_http_url") or ""),
+            server_ws_url=_signal_ws_url(signals_raw),
+            server_http_url=_signal_http_url(signals_raw),
             last_signal_id=int(signals_raw.get("last_signal_id") or 0),
         ),
         ui=LocalUiSettings(
@@ -183,6 +187,26 @@ def settings_from_dict(data: dict[str, Any]) -> LocalSettings:
             ),
         ),
     )
+
+
+def _signal_http_url(signals_raw: dict[str, Any]) -> str:
+    value = (
+        os.getenv("TWAP_CLIENT_HTTP_URL")
+        or os.getenv("LOCAL_SIGNAL_HTTP_URL")
+        or signals_raw.get("server_http_url")
+        or DEFAULT_SIGNAL_HTTP_URL
+    )
+    return str(value or DEFAULT_SIGNAL_HTTP_URL).strip().rstrip("/")
+
+
+def _signal_ws_url(signals_raw: dict[str, Any]) -> str:
+    value = (
+        os.getenv("TWAP_CLIENT_WS_URL")
+        or os.getenv("LOCAL_SIGNAL_WS_URL")
+        or signals_raw.get("server_ws_url")
+        or DEFAULT_SIGNAL_WS_URL
+    )
+    return str(value or DEFAULT_SIGNAL_WS_URL).strip()
 
 
 def _table_rows_from_dict(raw: dict[str, Any]) -> dict[str, int]:

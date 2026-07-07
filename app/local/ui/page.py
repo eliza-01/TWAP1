@@ -606,10 +606,46 @@ const amountInput = value => {
 };
 const rowOptions = [10, 25, 50, 100, 200, 500];
 
+function looksLikeHtml(text) {
+  const low = String(text || '').slice(0, 800).toLowerCase();
+  return low.includes('<!doctype html') || low.includes('<html') || low.includes('</html>');
+}
+function statusHint(status) {
+  if ([502, 503, 504].includes(status)) return `Сервер временно недоступен (HTTP ${status}).`;
+  if (status === 429) return 'Слишком много запросов. Попробуйте позже (HTTP 429).';
+  if (status === 404) return 'Адрес не найден (HTTP 404).';
+  if (status >= 500) return `Ошибка сервера (HTTP ${status}).`;
+  return `HTTP ${status}.`;
+}
+function cleanErrorMessage(message, status, fallback = 'Ошибка запроса') {
+  let text = String(message || fallback).trim();
+  if (!text) text = fallback;
+  if (looksLikeHtml(text)) {
+    const prefix = text.split('<', 1)[0].replace(/[\\s:.-]+$/g, '').trim() || fallback;
+    return `${prefix}. ${statusHint(status)}`;
+  }
+  return text.length > 500 ? `${text.slice(0, 497).trim()}...` : text;
+}
+function nonJsonMessage(status, text) {
+  if (looksLikeHtml(text)) return `Сервер вернул техническую HTML-страницу вместо JSON. ${statusHint(status)}`;
+  return `Сервер вернул не JSON. ${statusHint(status)}`;
+}
 async function api(url, opts = {}) {
   const res = await fetch(url, {headers: {'content-type': 'application/json'}, ...opts});
-  const data = await res.json();
-  if (!res.ok || data.success === false) throw new Error(data.message || 'Ошибка запроса');
+  const text = await res.text();
+  let data = {};
+  if (text.trim()) {
+    try {
+      data = JSON.parse(text);
+    } catch(e) {
+      throw new Error(nonJsonMessage(res.status, text));
+    }
+  }
+  if (!res.ok || data.success === false) {
+    const detail = typeof data.detail === 'string' ? data.detail : '';
+    const message = data.message || detail || `Ошибка запроса. HTTP ${res.status}`;
+    throw new Error(cleanErrorMessage(message, res.status));
+  }
   return data;
 }
 function boundedRows(value, fallback) {

@@ -15,6 +15,7 @@ INCLUDE_DIRS = (
     "app",
     # "tests",
     "tools",
+    "client_desktop",
 )
 
 INCLUDE_FILES = (
@@ -70,6 +71,8 @@ ALLOWED_EXTS = {
     ".txt",
     ".yaml",
     ".yml",
+    ".bat",
+    ".spec",
 }
 
 MAX_FILE_SIZE_BYTES = 512 * 1024

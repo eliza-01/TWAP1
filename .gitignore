@@ -12,3 +12,7 @@ local_data/
 
 .env.runtime
 .env.compose.generated
+
+client_desktop/build_config_generated.py
+dist/
+build/

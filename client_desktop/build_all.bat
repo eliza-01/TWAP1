@@ -3,20 +3,30 @@ setlocal
 cd /d "%~dp0\.."
 
 echo.
-echo === TWAPs desktop clients build ===
+echo === TWAPs desktop clients build: all variants ===
 echo Project root: %CD%
 echo.
 
 set "TWAPS_NO_PAUSE=1"
 
-call "%~dp0build_browser.bat"
+call "%~dp0browser\compile_prod.bat"
 if errorlevel 1 goto error
 
-call "%~dp0build_wv2.bat"
+call "%~dp0browser\compile_stage.bat"
+if errorlevel 1 goto error
+
+call "%~dp0wv2\compile_prod.bat"
+if errorlevel 1 goto error
+
+call "%~dp0wv2\compile_stage.bat"
 if errorlevel 1 goto error
 
 echo.
-echo Done: both desktop clients are in dist\
+echo Done: all desktop clients are in:
+echo   dist\browser\prod
+echo   dist\browser\stage
+echo   dist\wv2\prod
+echo   dist\wv2\stage
 echo.
 pause
 exit /b 0

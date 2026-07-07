@@ -14,10 +14,21 @@ import httpx
 import uvicorn
 from dotenv import load_dotenv
 
-APP_TITLE = "TWAPs"
+
+try:
+    from client_desktop import build_config_generated as _build_config
+except Exception:  # generated only by desktop compile scripts
+    _build_config = None
+
+APP_TITLE = str(getattr(_build_config, "APP_TITLE", "TWAPs"))
 HOST = "127.0.0.1"
+DEFAULT_STAGE_HTTP_URL = "https://beta.twaps.ru"
+DEFAULT_STAGE_WS_URL = "wss://beta.twaps.ru/ws/signals"
 DEFAULT_PROD_HTTP_URL = "https://twaps.ru"
 DEFAULT_PROD_WS_URL = "wss://twaps.ru/ws/signals"
+BUILD_FLAVOR = str(getattr(_build_config, "BUILD_FLAVOR", "stage")).strip().lower() or "stage"
+BUILD_DEFAULT_HTTP_URL = str(getattr(_build_config, "DEFAULT_HTTP_URL", DEFAULT_STAGE_HTTP_URL)).strip().rstrip("/") or DEFAULT_STAGE_HTTP_URL
+BUILD_DEFAULT_WS_URL = str(getattr(_build_config, "DEFAULT_WS_URL", DEFAULT_STAGE_WS_URL)).strip() or DEFAULT_STAGE_WS_URL
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +73,15 @@ def prepare_desktop_environment() -> Path:
     os.environ.setdefault("LOCAL_SETTINGS_PATH", str(data_dir / "settings.json"))
     os.environ.setdefault("LOCAL_SIGNALS_PATH", str(data_dir / "signals.json"))
     os.environ.setdefault("LOCAL_TRADES_PATH", str(data_dir / "trades.json"))
+    os.environ.setdefault("TWAP_CLIENT_BUILD_ENV", BUILD_FLAVOR)
 
-    # Desktop builds should be usable without a project .env. Values can still
-    # be overridden by .env or environment variables for stage/beta testing.
-    os.environ.setdefault("LOCAL_SIGNAL_HTTP_URL", os.getenv("PUBLIC_BASE_URL") or DEFAULT_PROD_HTTP_URL)
-    os.environ.setdefault("LOCAL_SIGNAL_WS_URL", os.getenv("PUBLIC_SIGNAL_WS_URL") or DEFAULT_PROD_WS_URL)
+    # Desktop builds must be usable without a project .env. In customer/test
+    # builds the safe default is the currently configured public stage server;
+    # prod can still be forced by placing .env next to the exe or by exporting
+    # TWAP_CLIENT_HTTP_URL / TWAP_CLIENT_WS_URL / LOCAL_SIGNAL_* variables.
+    http_url, ws_url = _resolve_default_signal_urls()
+    os.environ.setdefault("LOCAL_SIGNAL_HTTP_URL", http_url)
+    os.environ.setdefault("LOCAL_SIGNAL_WS_URL", ws_url)
 
     return data_dir
 
@@ -84,6 +99,57 @@ def _configure_desktop_logging(data_dir: Path) -> None:
     handler._twaps_desktop_handler = True  # type: ignore[attr-defined]
     root.addHandler(handler)
     root.setLevel(logging.INFO)
+
+
+def _resolve_default_signal_urls() -> tuple[str, str]:
+    explicit_http = (
+        os.getenv("TWAP_CLIENT_HTTP_URL")
+        or os.getenv("LOCAL_SIGNAL_HTTP_URL")
+        or os.getenv("PUBLIC_BASE_URL")
+        or ""
+    ).strip().rstrip("/")
+    explicit_ws = (
+        os.getenv("TWAP_CLIENT_WS_URL")
+        or os.getenv("LOCAL_SIGNAL_WS_URL")
+        or os.getenv("PUBLIC_SIGNAL_WS_URL")
+        or ""
+    ).strip()
+
+    if explicit_http and explicit_ws:
+        return explicit_http, explicit_ws
+
+    # Do not infer the customer endpoint from STAGE here. STAGE controls the
+    # server deployment profile, while the desktop client may intentionally use
+    # beta even when the project .env has STAGE=OFF. Production endpoint must be
+    # selected explicitly through LOCAL_SIGNAL_* or TWAP_CLIENT_* variables.
+    default_http = BUILD_DEFAULT_HTTP_URL
+    default_ws = BUILD_DEFAULT_WS_URL
+
+    if explicit_http and not explicit_ws:
+        return explicit_http, _http_to_ws_url(explicit_http)
+    if explicit_ws and not explicit_http:
+        return _ws_to_http_url(explicit_ws), explicit_ws
+    return default_http, default_ws
+
+
+def _http_to_ws_url(http_url: str) -> str:
+    clean = http_url.strip().rstrip("/")
+    if clean.startswith("https://"):
+        return "wss://" + clean.removeprefix("https://") + "/ws/signals"
+    if clean.startswith("http://"):
+        return "ws://" + clean.removeprefix("http://") + "/ws/signals"
+    return BUILD_DEFAULT_WS_URL
+
+
+def _ws_to_http_url(ws_url: str) -> str:
+    clean = ws_url.strip()
+    if clean.endswith("/ws/signals"):
+        clean = clean[: -len("/ws/signals")]
+    if clean.startswith("wss://"):
+        return "https://" + clean.removeprefix("wss://").rstrip("/")
+    if clean.startswith("ws://"):
+        return "http://" + clean.removeprefix("ws://").rstrip("/")
+    return BUILD_DEFAULT_HTTP_URL
 
 
 def find_free_port() -> int:
@@ -177,3 +243,4 @@ def format_open_trades_for_warning(trades: list[dict[str, Any]], limit: int = 5)
     if len(trades) > limit:
         rows.append(f"• ...и ещё {len(trades) - limit}")
     return "\n".join(rows)
+
