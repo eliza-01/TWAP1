@@ -109,6 +109,14 @@ echo Preparing application icon...
 "%VENV_PY%" -m client_desktop.icon_tools
 if errorlevel 1 goto error
 
+if not exist "client_desktop\assets\twaps_icon.ico" (
+  echo.
+  echo TWAPs icon was not generated.
+  echo Expected file: client_desktop\assets\twaps_icon.ico
+  echo Source PNG must exist: client_desktop\assets\twaps_icon_256.png
+  goto error
+)
+
 echo.
 echo Building %TWAP_KIND_TITLE% %TWAP_BUILD_FLAVOR% client...
 if exist "%TWAP_DIST%\%TWAP_EXE_NAME%.exe" (

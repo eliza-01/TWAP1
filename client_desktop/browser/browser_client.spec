@@ -55,5 +55,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(ICON_ICO) if ICON_ICO.exists() else None,
+    icon=str(ICON_ICO),
 )
+

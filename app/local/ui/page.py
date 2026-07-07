@@ -49,20 +49,87 @@ def render_page() -> str:
       position: sticky;
       top: 0;
       z-index: 20;
-      backdrop-filter: blur(16px);
-      background: rgba(11, 17, 29, .86);
-      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(18px);
+      background:
+        linear-gradient(90deg, rgba(11, 17, 29, .96), rgba(12, 25, 42, .94)),
+        radial-gradient(circle at 18% 0%, rgba(110, 231, 183, .16), transparent 34%),
+        radial-gradient(circle at 88% 0%, rgba(96, 165, 250, .16), transparent 30%);
+      border-bottom: 1px solid rgba(148, 163, 184, .24);
+      box-shadow: 0 14px 42px rgba(0, 0, 0, .24);
     }
     .topbar-inner {
       max-width: 1280px;
       margin: 0 auto;
-      padding: 14px 22px;
+      padding: 12px 22px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 14px;
     }
-    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .brand-copy { min-width: 0; }
+    .toolbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+    }
+    .toolbar-actions .secondary {
+      width: auto;
+      min-height: 38px;
+      padding: 9px 13px;
+      border-radius: 12px;
+      white-space: nowrap;
+    }
+    .window-controls {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      padding-left: 8px;
+      margin-left: 2px;
+      border-left: 1px solid rgba(148, 163, 184, .18);
+    }
+    body.desktop-window .window-controls { display: flex; }
+    .chrome-btn {
+      width: 38px;
+      height: 34px;
+      border-radius: 11px;
+      border: 1px solid rgba(148, 163, 184, .20);
+      background: rgba(15, 23, 42, .58);
+      color: var(--text);
+      font-size: 15px;
+      font-weight: 900;
+      line-height: 1;
+      display: inline-grid;
+      place-items: center;
+      cursor: pointer;
+      box-shadow: none;
+    }
+    .chrome-btn:hover {
+      background: rgba(96, 165, 250, .14);
+      border-color: rgba(96, 165, 250, .34);
+      transform: none;
+    }
+    .chrome-btn.tray {
+      width: auto;
+      padding: 0 12px;
+      font-size: 12px;
+      letter-spacing: .02em;
+      text-transform: uppercase;
+    }
+    .chrome-btn.close:hover {
+      background: rgba(251, 113, 133, .18);
+      border-color: rgba(251, 113, 133, .42);
+      color: #fecdd3;
+    }
+
     .brand-mark {
       width: 38px;
       height: 38px;
@@ -411,14 +478,21 @@ def render_page() -> str:
 <body>
 <header class="topbar">
   <div class="topbar-inner">
-    <div class="brand">
+    <div class="brand" title="TWAPs">
       <div class="brand-mark">TW</div>
-      <div>
+      <div class="brand-copy">
         <div class="brand-title">TWAPs</div>
         <div class="brand-subtitle">Локальная панель управления</div>
       </div>
     </div>
-    <button class="secondary" style="width:auto" onclick="saveSettings()">Сохранить настройки</button>
+    <div class="toolbar-actions">
+      <button class="secondary" onclick="saveSettings()">Сохранить настройки</button>
+      <div class="window-controls" aria-label="Управление окном">
+        <button class="chrome-btn" type="button" title="Свернуть" onclick="desktopWindowAction('minimize')">—</button>
+        <button class="chrome-btn tray" type="button" title="Свернуть в трей" onclick="desktopWindowAction('minimize_to_tray')">Трей</button>
+        <button class="chrome-btn close" type="button" title="Закрыть" onclick="desktopWindowAction('request_close')">×</button>
+      </div>
+    </div>
   </div>
 </header>
 
@@ -1126,8 +1200,30 @@ async function loadFallbackReports() {
   const data = await api(`/api/trading/fallback-reports?limit=${rowLimit('fallback_reports')}`);
   $('fallbackReports').innerHTML = data.items.map(x => `<tr><td>${x.id || ''}</td><td>${x.triggered_at || x.created_at || ''}</td><td><span class="pill ${x.status === 'success' ? 'ok' : (x.status === 'error' ? 'bad' : '')}">${esc(x.status || '')}</span></td><td>${esc(x.trade_key || '')}</td><td>${esc(x.symbol || '')}</td><td>${esc(x.message || '')}</td></tr>`).join('');
 }
+
+function nativeWindowApiReady() {
+  return Boolean(window.pywebview && window.pywebview.api);
+}
+
+function markDesktopWindowControls(retries = 20) {
+  if (nativeWindowApiReady()) {
+    document.body.classList.add('desktop-window');
+    return;
+  }
+  if (retries > 0) setTimeout(() => markDesktopWindowControls(retries - 1), 150);
+}
+
+async function desktopWindowAction(action) {
+  try {
+    if (!nativeWindowApiReady() || !window.pywebview.api[action]) return;
+    await window.pywebview.api[action]();
+  } catch (e) {
+    console.warn('Desktop window action failed', action, e);
+  }
+}
+
+markDesktopWindowControls();
 init();
 </script>
 </body>
 </html>"""
-
