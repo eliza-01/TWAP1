@@ -77,51 +77,44 @@ def render_page() -> str:
     .brand-title { font-weight: 900; letter-spacing: .04em; }
     .brand-subtitle { color: var(--muted); font-size: 12px; margin-top: 1px; }
 
-    .hero {
-      margin: 22px 0;
+    .sticky-alerts {
+      position: sticky;
+      top: 68px;
+      z-index: 18;
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 360px;
-      gap: 16px;
-      align-items: stretch;
-    }
-    .hero-card {
-      min-height: 172px;
-      border: 1px solid var(--border);
-      border-radius: 28px;
-      padding: 28px;
-      background: linear-gradient(145deg, rgba(17, 26, 42, .95), rgba(8, 16, 28, .95));
-      box-shadow: var(--shadow);
-    }
-    .hero-card .muted { max-width: 680px; margin-top: 12px; }
-
-    .fallback-warning {
-      display: none;
+      gap: 8px;
       margin: 0 0 14px;
+    }
+    .sticky-alert {
+      display: block;
+      margin-top: 5px;
       padding: 12px 14px;
       border-radius: 16px;
-      border: 1px solid rgba(251, 113, 133, .42);
-      background: rgba(251, 113, 133, .12);
+      border: 1px solid var(--border-strong);
+      background: rgba(17, 26, 42, .94);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .22);
+      font-weight: 850;
+      line-height: 1.35;
+      backdrop-filter: blur(14px);
+    }
+    .sticky-alert b { display: block; margin-bottom: 2px; }
+    .sticky-alert .muted { color: inherit; opacity: .82; }
+    .sticky-alert.ok {
+      border-color: rgba(52, 211, 153, .46);
+      background: rgba(16, 38, 33, .94);
+      color: #bbf7d0;
+    }
+    .sticky-alert.warn, .sticky-alert.connecting, .sticky-alert.reconnecting {
+      border-color: rgba(251, 191, 36, .46);
+      background: rgba(49, 35, 13, .94);
+      color: #fde68a;
+    }
+    .sticky-alert.danger, .sticky-alert.error {
+      border-color: rgba(251, 113, 133, .48);
+      background: rgba(52, 19, 29, .94);
       color: #fecdd3;
-      font-weight: 800;
     }
-
-    .signal-banner {
-      height: 100%;
-      min-height: 172px;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      gap: 8px;
-      border: 1px solid var(--border);
-      border-radius: 28px;
-      padding: 24px;
-      background: rgba(17, 26, 42, .92);
-      box-shadow: var(--shadow);
-    }
-    .signal-banner b { display: block; font-size: 19px; letter-spacing: -.02em; }
-    .signal-banner.connected { border-color: rgba(52, 211, 153, .38); background: rgba(16, 38, 33, .86); }
-    .signal-banner.connecting, .signal-banner.reconnecting { border-color: rgba(251, 191, 36, .42); background: rgba(49, 35, 13, .86); }
-    .signal-banner.error { border-color: rgba(251, 113, 133, .42); background: rgba(52, 19, 29, .86); }
+    .sticky-alert.hidden { display: none; }
 
     .sections { display: grid; gap: 14px; }
     details.section {
@@ -193,13 +186,38 @@ def render_page() -> str:
       border-radius: 16px;
       padding: 12px;
     }
-    .field.wide { grid-column: span 6; }
+    .field.wide, .field.half { grid-column: span 6; }
     .field.full { grid-column: 1 / -1; }
     .field.critical {
-      grid-column: 1 / -1;
       border-color: rgba(251, 191, 36, .34);
       background: rgba(49, 35, 13, .34);
     }
+    .field-control-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+    }
+    .field-control-row button { width: auto; min-width: 132px; padding-left: 12px; padding-right: 12px; }
+    .leverage-control {
+      display: grid;
+      grid-template-columns: minmax(92px, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+    }
+    .quick-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: flex-end;
+    }
+    .quick-buttons button {
+      width: auto;
+      min-width: 44px;
+      padding: 10px 9px;
+      border-radius: 11px;
+    }
+    .hidden { display: none !important; }
     label {
       display: block;
       margin: 0 0 7px;
@@ -242,6 +260,7 @@ def render_page() -> str:
     }
     .actions button { width: auto; min-width: 150px; }
     .actions .danger { margin-left: auto; }
+    .actions.manual-actions .danger { margin-left: 0; }
 
     .status {
       margin: 14px 0 0;
@@ -341,14 +360,16 @@ def render_page() -> str:
     }
 
     @media (max-width: 1000px) {
-      .hero { grid-template-columns: 1fr; }
       .field { grid-column: span 6; }
-      .field.wide { grid-column: 1 / -1; }
+      .field.wide, .field.half { grid-column: 1 / -1; }
     }
     @media (max-width: 680px) {
       main, .topbar-inner { padding-left: 14px; padding-right: 14px; }
-      .hero-card, .signal-banner { border-radius: 20px; padding: 20px; }
-      .field, .field.wide { grid-column: 1 / -1; }
+      .sticky-alerts { top: 64px; }
+      .field, .field.wide, .field.half { grid-column: 1 / -1; }
+      .field-control-row, .leverage-control { grid-template-columns: 1fr; }
+      .field-control-row button { width: 100%; }
+      .quick-buttons { justify-content: flex-start; }
       .actions button, .actions .danger { width: 100%; margin-left: 0; }
       .search-row { grid-template-columns: 1fr; }
       .table-toolbar { align-items: flex-start; flex-direction: column; }
@@ -370,18 +391,13 @@ def render_page() -> str:
 </header>
 
 <main>
-  <div id="fallbackWarning" class="fallback-warning">Страховка закрытия сделки по окончанию срока TWAP отключена!</div>
-
-  <section class="hero">
-    <div class="hero-card">
-      <h1>Панель софта</h1>
-      <div class="muted">Минимум текста, важные настройки разнесены по строкам. JSON-ответы оставлены без изменений.</div>
-    </div>
-    <div id="signalBanner" class="signal-banner">
-      <b>Состояние неизвестно</b>
+  <div class="sticky-alerts">
+    <div id="fallbackWarning" class="sticky-alert danger">Страховка закрытия сделки по окончанию срока TWAP отключена!</div>
+    <div id="signalStickyAlert" class="sticky-alert warn hidden">
+      <b>Переподключение к серверу сигналов</b>
       <span class="muted">Статус ещё не загружен</span>
     </div>
-  </section>
+  </div>
 
   <div class="sections">
     <details class="section" open>
@@ -412,7 +428,7 @@ def render_page() -> str:
         <div class="form-grid">
           <div class="field"><label>Биржа</label><select id="exchange"></select></div>
           <div class="field"><label>Binance включена</label><select id="binanceEnabled"><option value="true">Да</option><option value="false">Нет</option></select></div>
-          <div class="field critical"><label>Режим позиций Binance</label><select id="binanceHedgeMode"><option value="true">Hedge Mode: Long и Short отдельно</option><option value="false">One-way Mode: Long закрывает Short</option></select></div>
+          <div class="field critical half"><label>Режим позиций Binance</label><select id="binanceHedgeMode"><option value="true">Hedge Mode: Long и Short отдельно</option><option value="false">One-way Mode: Long закрывает Short</option></select></div>
           <div class="field wide"><label>Binance API key</label><input id="binanceApiKey" placeholder="API key" type="password" /></div>
           <div class="field wide"><label>Binance Secret key</label><input id="binanceSecretKey" placeholder="Secret key" type="password" /></div>
         </div>
@@ -461,20 +477,37 @@ def render_page() -> str:
             <datalist id="symbolOptions"></datalist>
           </div>
           <div class="field"><label>Направление</label><select id="direction"><option value="long">Long</option><option value="short">Short</option></select></div>
-          <div class="field critical"><label>Объем, USDT</label><input id="amountUsdt" type="number" step="0.01" min="0.01" value="10" oninput="updateManualPreview()" /></div>
+          <div class="field critical half">
+            <label>Объем, USDT</label>
+            <div class="field-control-row">
+              <input id="amountUsdt" type="number" step="0.01" min="0.01" value="10" oninput="updateManualPreview()" />
+              <button class="secondary" onclick="setMinManualAmount()">Минимальный объем</button>
+            </div>
+          </div>
           <div class="field"><label>Округление объема</label><select id="notionalRounding" onchange="updateManualPreview()"><option value="down">В меньшую сторону</option><option value="up">В большую сторону</option></select></div>
-          <div class="field"><label>Плечо</label><input id="leverage" type="number" min="1" value="1" /></div>
+          <div class="field half">
+            <label>Плечо</label>
+            <div class="leverage-control">
+              <input id="leverage" type="number" min="1" value="1" />
+              <div class="quick-buttons" aria-label="Быстрый выбор плеча">
+                <button class="secondary" type="button" onclick="setManualLeverage(5)">5</button>
+                <button class="secondary" type="button" onclick="setManualLeverage(10)">10</button>
+                <button class="secondary" type="button" onclick="setManualLeverage(20)">20</button>
+                <button class="secondary" type="button" onclick="setManualLeverage(50)">50</button>
+                <button class="secondary" type="button" onclick="setManualLeverage(100)">100</button>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="actions">
+        <div class="actions manual-actions">
           <button onclick="openOrder()">Открыть market</button>
           <button class="danger" onclick="closeOrder()">Закрыть market</button>
-          <button class="secondary" onclick="loadPositions()">Позиции</button>
-          <button class="secondary" onclick="setMinManualAmount()">Минимальный объем</button>
+          <button class="secondary hidden" onclick="loadPositions()">Позиции</button>
         </div>
         <div id="manualPreview" class="trade-preview"></div>
         <pre id="rules" class="status"></pre>
         <pre id="tradeResult" class="status"></pre>
-        <div class="table-card">
+        <div class="table-card hidden" id="positionsBlock">
           <div class="table-toolbar">
             <span class="table-title">Позиции</span>
             <label class="rows-control">Показывать строк: <select id="rowsPositions" data-table-rows="positions" onchange="saveUiSettingsFromControls(); renderPositions()"></select></label>
@@ -756,6 +789,10 @@ async function init() {
   setInterval(loadOpenTrades, 10000);
   setInterval(loadFallbackReports, 10000);
 }
+function setManualLeverage(value) {
+  $('leverage').value = value;
+}
+
 function applyMinVolumeFlag() {
   const useMin = $('useMinVolume').value === 'true';
   $('autoOrderUsdt').disabled = useMin;
@@ -812,7 +849,11 @@ function updateFallbackWarning() {
   const banner = $('fallbackWarning');
   if (!banner) return;
   const enabled = $('fallbackCloseEnabled')?.value === 'true';
-  banner.style.display = enabled ? 'none' : 'block';
+  banner.className = `sticky-alert ${enabled ? 'ok' : 'danger'}`;
+  banner.textContent = enabled
+    ? 'Страховка закрытия сделки по окончанию срока TWAP включена.'
+    : 'Страховка закрытия сделки по окончанию срока TWAP отключена!';
+  banner.style.display = 'block';
 }
 
 async function loadAuthStatus() {
@@ -989,8 +1030,12 @@ function renderSignalState(data) {
   const state = data?.state || 'error';
   const title = state === 'connected' ? 'Подключено: сигналы слушаются' : state === 'connecting' ? 'Подключение к серверу сигналов' : state === 'reconnecting' ? 'Переподключение к серверу сигналов' : 'Нет соединения с сервером сигналов';
   const details = data?.message || data?.health_message || '';
-  $('signalBanner').className = `signal-banner ${esc(state)}`;
-  $('signalBanner').innerHTML = `<b>${esc(title)}</b><span class="muted">${esc(details)}</span>`;
+  const negative = state !== 'connected' || data?.health_ok === false;
+  const banner = $('signalStickyAlert');
+  if (banner) {
+    banner.className = `sticky-alert ${negative ? esc(state) : 'ok'}${negative ? '' : ' hidden'}`;
+    banner.innerHTML = `<b>${esc(title)}</b>${details ? `<span class="muted">${esc(details)}</span>` : ''}`;
+  }
 }
 async function signalStatus() {
   try {
@@ -1045,3 +1090,4 @@ init();
 </script>
 </body>
 </html>"""
+
