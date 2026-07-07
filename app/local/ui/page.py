@@ -160,6 +160,38 @@ def render_page() -> str:
       padding: 20px 22px 22px;
     }
 
+    details.subsection {
+      margin-top: 14px;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: rgba(8, 16, 28, .46);
+      overflow: hidden;
+    }
+    details.subsection > summary {
+      cursor: pointer;
+      list-style: none;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      user-select: none;
+      font-weight: 900;
+      color: #bfdbfe;
+    }
+    details.subsection > summary::-webkit-details-marker { display: none; }
+    details.subsection > summary::after {
+      content: "⌄";
+      color: var(--muted);
+      font-size: 17px;
+      transition: transform .18s ease;
+    }
+    details.subsection[open] > summary::after { transform: rotate(180deg); }
+    .subsection-body {
+      border-top: 1px solid var(--border);
+      padding: 14px 16px 16px;
+    }
+
     .hint {
       margin: 0 0 14px;
       color: var(--muted);
@@ -408,7 +440,7 @@ def render_page() -> str:
         <div class="form-grid">
           <div class="field"><label>Логин</label><input id="authLogin" placeholder="login" /></div>
           <div class="field"><label>Пароль</label><input id="authPassword" placeholder="password" type="password" /></div>
-          <div class="field"><label>Код</label><input id="authCode" placeholder="6 цифр" /></div>
+          <div class="field"><label>Код (telegram)</label><input id="authCode" placeholder="6 цифр" /></div>
           <div class="field"><label>Устройство</label><input id="authDeviceName" placeholder="local-client" /></div>
         </div>
         <div class="actions">
@@ -465,7 +497,7 @@ def render_page() -> str:
       </div>
     </details>
 
-    <details class="section" open>
+    <details class="section">
       <summary>
         <span class="summary-title"><span class="num">4</span><span><h3>Ручная сделка</h3><span class="muted small">Market open / close</span></span></span>
       </summary>
@@ -529,20 +561,29 @@ def render_page() -> str:
           <div class="field critical"><label>Страховка закрытия TWAP</label><select id="fallbackCloseEnabled" onchange="updateFallbackWarning()"><option value="false">Выключена</option><option value="true">Включена</option></select></div>
           <div class="field"><label>Задержка страховки, сек</label><input id="fallbackCloseGraceSeconds" type="number" step="1" min="0" value="5" /></div>
 
-          <div class="field critical"><label>Входить минимальным объемом</label><select id="useMinVolume" onchange="applyMinVolumeFlag()"><option value="false">Нет</option><option value="true">Да, плечо 1x</option></select></div>
           <div class="field"><label>Объем сделки, USDT</label><input id="autoOrderUsdt" type="number" step="0.01" min="0.01" value="10" /></div>
           <div class="field"><label>Базовое плечо</label><input id="autoLeverage" type="number" min="1" value="1" /></div>
           <div class="field"><label>Авто-плечо</label><select id="autoLeverageEnabled"><option value="true">Да</option><option value="false">Нет</option></select></div>
           <div class="field"><label>Макс. авто-плечо</label><input id="maxAutoLeverage" type="number" min="1" value="20" /></div>
 
-          <div class="field critical"><label>Локальные фильтры входа</label><select id="localSignalFiltersEnabled"><option value="true">Включены</option><option value="false">Отключены, входить по всем сигналам</option></select></div>
+          <div class="field critical"><label>Фильтры входа</label><select id="localSignalFiltersEnabled"><option value="true">Включены</option><option value="false">Отключены, входить по всем сигналам</option></select></div>
           <div class="field"><label>Мин. TWAP объем, USD</label><input id="filterMinUsd" type="number" step="1000" min="0" value="300000" /></div>
           <div class="field"><label>Макс. длительность, мин</label><input id="filterMaxDuration" type="number" step="1" min="1" value="30" /></div>
           <div class="field"><label>Макс. market volume, USD</label><input id="filterMaxMarketVolume" type="number" step="1000000" min="1" value="100000000" /></div>
           <div class="field"><label>Мин. TWAP share, %</label><input id="filterMinShare" type="number" step="0.01" min="0" value="0.5" /></div>
-          <div class="field critical"><label>Игнорировать min USD по доле рынка</label><select id="ignoreMinUsdByShare"><option value="false">Нет</option><option value="true">Да, только min USD</option></select></div>
-          <div class="field"><label>Порог TWAP share, %</label><input id="minUsdOverrideShare" type="number" step="0.01" min="0.01" value="1" /></div>
         </div>
+
+        <details class="subsection">
+          <summary>Дополнительно</summary>
+          <div class="subsection-body">
+            <div class="form-grid">
+              <div class="field critical"><label>Входить минимальным объемом</label><select id="useMinVolume" onchange="applyMinVolumeFlag()"><option value="false">Нет</option><option value="true">Да, плечо 1x</option></select></div>
+              <div class="field critical"><label>Игнорировать min USD по доле рынка</label><select id="ignoreMinUsdByShare"><option value="false">Нет</option><option value="true">Да, только min USD</option></select></div>
+              <div class="field"><label>Макс. TWAP share, %</label><input id="minUsdOverrideShare" type="number" step="0.01" min="0.01" value="1" /></div>
+            </div>
+          </div>
+        </details>
+
         <div class="actions">
           <button onclick="saveSettings()">Сохранить автоторговлю</button>
           <button class="secondary" onclick="loadTradingLogs()">Логи</button>
@@ -993,7 +1034,6 @@ function updateManualPreview() {
   const direction = preview.roundUp ? 'в большую сторону' : 'в меньшую сторону';
   const cards = [
     `<div><span class="muted">Размер 1 контракта</span><b>${fmtMoney(preview.oneContractUsdt)}</b></div>`,
-    `<div><span class="muted">Биржа получит объем</span><b>${fmt(preview.contracts)} quantity</b></div>`,
     `<div><span class="muted">Сделка будет открыта в объеме</span><b>${fmtMoney(preview.openedUsdt)}</b></div>`,
     `<div><span class="muted">Отклонение от ввода</span><b class="${diffClass}">${preview.diff >= 0 ? '+' : '-'}${fmtMoney(Math.abs(preview.diff))}</b><span class="muted">Округление ${direction}</span></div>`
   ];
